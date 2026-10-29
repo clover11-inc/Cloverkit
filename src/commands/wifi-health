@@ -1,0 +1,8 @@
+#!/bin/bash
+/usr/bin/python3 -c "import sys; sys.path.insert(0,'/usr/local/lib/bh-interactive'); from cloverkit_radio_identity import assert_layout; assert_layout()" || exit 2
+if [ "${1:-}" = "--connected" ]; then
+    shift
+    exec /usr/local/bin/wifi-health-connected "$@"
+fi
+if [ "$#" -ne 0 ]; then echo 'Passive mode is automatic: wifi-health (no arguments)'; exit 2; fi
+exec sudo -n /usr/local/bin/wifi-passive-health

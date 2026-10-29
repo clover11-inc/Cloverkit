@@ -1,0 +1,137 @@
+#!/bin/bash
+
+SSHD="/usr/sbin/sshd"
+NFT="/usr/sbin/nft"
+IPTABLES="/usr/sbin/iptables"
+SS="/usr/bin/ss"
+
+echo "SECURITY STATUS"
+echo
+
+echo "USER"
+echo "  Login : $(whoami)"
+echo "  Host  : $(hostname)"
+echo
+
+echo "NETWORK"
+
+IP=$(/usr/sbin/ip -4 -o addr show wlan0 2>/dev/null |
+     awk '{print $4; exit}')
+
+[ -z "$IP" ] && IP="No IPv4"
+
+echo "  wlan0 : $IP"
+
+if /usr/sbin/ip link show 2>/dev/null |
+   grep -Eq 'tun[0-9]|wg[0-9]|surfshark'; then
+    VPN="ON"
+else
+    VPN="OFF"
+fi
+
+echo "  VPN   : $VPN"
+echo
+
+echo "SSH"
+
+if [ -x "$SSHD" ]; then
+
+    SSHCFG=$(sudo -n "$SSHD" -T 2>/dev/null)
+
+    ROOTLOGIN=$(printf '%s\n' "$SSHCFG" |
+        awk '$1=="permitrootlogin"{print $2; exit}')
+
+    PASSAUTH=$(printf '%s\n' "$SSHCFG" |
+        awk '$1=="passwordauthentication"{print $2; exit}')
+
+    [ -z "$ROOTLOGIN" ] && ROOTLOGIN="unknown"
+    [ -z "$PASSAUTH" ] && PASSAUTH="unknown"
+
+    echo "  Root login : $ROOTLOGIN"
+    echo "  Password   : $PASSAUTH"
+else
+    echo "  sshd       : not found"
+fi
+
+echo
+
+echo "CONSOLE"
+
+if id console >/dev/null 2>&1; then
+
+    STATE=$(sudo -n passwd -S console 2>/dev/null |
+            awk '{print $2}')
+
+    case "$STATE" in
+        P)  STATE="ENABLED" ;;
+        L|LK) STATE="LOCKED" ;;
+        NP) STATE="NO PASSWORD" ;;
+        "") STATE="UNKNOWN" ;;
+    esac
+
+    echo "  Account : $STATE"
+
+    SESSIONS=$(who 2>/dev/null |
+        awk '$1=="console"{c++} END{print c+0}')
+
+    echo "  Sessions: $SESSIONS"
+else
+    echo "  Account : NOT PRESENT"
+fi
+
+echo
+
+echo "LISTENING"
+
+sudo -n "$SS" -lntup 2>/dev/null |
+awk '
+NR > 1 {
+    printf "  %-4s %-22s %s\n",
+           $1, $5, ($7=="" ? "?" : $7)
+}
+'
+
+echo
+
+echo "FIREWALL"
+
+if [ -x "$NFT" ]; then
+    RULES=$(sudo -n "$NFT" list ruleset 2>/dev/null)
+
+    if [ -n "$RULES" ]; then
+        echo "  nftables : RULES PRESENT"
+    else
+        echo "  nftables : NO RULES"
+    fi
+else
+    echo "  nftables : not installed"
+fi
+
+if [ -x "$IPTABLES" ]; then
+    RULES=$(sudo -n "$IPTABLES" -S 2>/dev/null)
+
+    NONDEFAULT=$(printf '%s
+' "$RULES" |
+        grep -vE '^-P (INPUT|FORWARD|OUTPUT) ACCEPT$' |
+        grep -c .)
+
+    if [ "$NONDEFAULT" -gt 0 ]; then
+        echo "  iptables : FILTERING"
+    else
+        echo "  iptables : OPEN"
+    fi
+else
+    echo "  iptables : not installed"
+fi
+
+echo
+
+echo "SYSTEM"
+
+FAILED=$(systemctl --failed --no-legend 2>/dev/null |
+         grep -c .)
+
+echo "  Failed services: $FAILED"
+
+echo
+echo "OBSERVE ONLY - no settings changed"

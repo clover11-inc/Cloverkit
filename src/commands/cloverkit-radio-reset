@@ -1,0 +1,44 @@
+#!/usr/bin/python3
+"""Explicit recovery of independent development radios; wlan0 is never modified."""
+import fcntl,json,os,re,sys,time
+from pathlib import Path
+sys.path.insert(0,'/usr/local/lib/bh-interactive')
+import cloverkit_radio_recovery as recovery
+
+def status():
+    path=Path('/var/lib/cloverkit/wifi-passive-health/latest.json')
+    data=json.loads(path.read_text())
+    print('Capture:',data.get('state'),'report age',round(time.time()-data.get('updated_at',0),1),'s',flush=True)
+    for name,row in data.get('radios',{}).items():
+        if name not in ('wlan1','wlan2'):continue
+        print(name,'MHz',row.get('frequency'),'frames',row.get('frames'),'last frame',row.get('last_frame_seconds'),'s ago','error',row.get('error'),flush=True)
+
+def reset():
+    with open('/run/lock/cloverkit-passive-health.lock','a') as global_lock:
+        fcntl.flock(global_lock,fcntl.LOCK_EX|fcntl.LOCK_NB)
+        if recovery.active_captures():raise RuntimeError('Capture still active. Stop it and wait for cleanup before Reset.')
+        restored=recovery.recover()
+        for name in ('wlan1','wlan2'):
+            if not (Path('/sys/class/net')/name).exists():
+                print(name+': not connected',flush=True);continue
+            recovery.verify_external(name)
+            phy=(Path('/sys/class/net')/name/'phy80211').resolve(strict=True).name
+            record=dict(name=name,phy=phy,managed='yes',uuid='',was_up=True,original_type='managed')
+            recovery.guard(record)
+            if name not in restored:
+                with open('/run/lock/cloverkit-passive-'+phy+'.lock','a') as radio_lock:
+                    fcntl.flock(radio_lock,fcntl.LOCK_EX|fcntl.LOCK_NB)
+                    recovery.restore(record)
+            recovery.guard(record)
+            info=recovery.call(['iw','dev',name,'info'])
+            if not re.search(r'^\s*type managed\s*$',info,re.M):raise RuntimeError(name+': managed mode not verified')
+            print(name+': managed mode restored',flush=True)
+        print('Reset complete. wlan0 protected. No Wi-Fi connection was initiated except restoration of a journaled connection.',flush=True)
+
+def main():
+    if sys.argv[1:]==['--status']:status();return
+    if sys.argv[1:]:raise RuntimeError('Usage: cloverkit-radio-reset [--status]')
+    reset()
+if __name__=='__main__':
+    try:main()
+    except Exception as error:print('Radio recovery: '+str(error),flush=True);raise SystemExit(1)

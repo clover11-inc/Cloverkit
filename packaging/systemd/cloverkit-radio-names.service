@@ -1,0 +1,10 @@
+[Unit]
+Description=Assign protected built-in and development USB radio names
+Wants=systemd-udev-settle.service
+After=systemd-udev-settle.service
+Before=NetworkManager.service
+[Service]
+Type=oneshot
+ExecStart=/usr/local/bin/cloverkit-name-radios
+[Install]
+WantedBy=multi-user.target

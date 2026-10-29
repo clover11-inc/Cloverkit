@@ -1,0 +1,453 @@
+{
+  "schema": 1,
+  "base": {
+    "url": "https://github.com/o7-machinehum/flipper-blackhat-os/releases/download/armbian/v1.4/blackhat-os-armbian-v1_4.zip",
+    "file": "blackhat-os-armbian-v1_4.zip",
+    "size": 1150212101,
+    "sha256": "f67d718f148f0fd4503c471ee7e6b7a75a0b84ad906ce155e1dcbd628fce3af3",
+    "image_size": 3770679296,
+    "image_sha256": "680d42be35168b20aa7cffb26825c4cd924417db9a9780cf3e0be123767636c5"
+  },
+  "offline_repo": {
+    "targets": [
+      "tshark",
+      "tcpdump",
+      "python3-scapy",
+      "python3-bleak",
+      "python3-requests",
+      "python3-serial",
+      "ethtool",
+      "rfkill",
+      "iw",
+      "bluez",
+      "iperf3",
+      "smbclient",
+      "bind9-dnsutils",
+      "nmap",
+      "iproute2",
+      "network-manager",
+      "python3-pil",
+      "fonts-dejavu-core",
+      "dnsmasq-base",
+      "netcat-openbsd",
+      "arping"
+    ],
+    "packages": [
+      {
+        "name": "arping",
+        "version": "2.29-1",
+        "file": "debs/arping_2.29-1_armhf.deb",
+        "sha256": "c3be6a7f912b6a21826969259ec66ae495182a51be1a54170fa414f5652c61ed",
+        "size": 33952,
+        "url": "https://http.kali.org/kali/pool/main/a/arping/arping_2.29-1_armhf.deb",
+        "source_package": "arping"
+      },
+      {
+        "name": "bind9-dnsutils",
+        "version": "1:9.20.29-1",
+        "file": "debs/bind9-dnsutils_9.20.29-1_armhf.deb",
+        "sha256": "a197901dca64c44ea6dc829bcce7f34e733021646bf42182a254b07979b0bb28",
+        "size": 152252,
+        "url": "https://http.kali.org/kali/pool/main/b/bind9/bind9-dnsutils_9.20.29-1_armhf.deb",
+        "source_package": "bind9"
+      },
+      {
+        "name": "bind9-host",
+        "version": "1:9.20.29-1",
+        "file": "debs/bind9-host_9.20.29-1_armhf.deb",
+        "sha256": "f975efd1e29c0dd0808e9510e4f951e64464dfd8cee01340c7707bdf0978be34",
+        "size": 47696,
+        "url": "https://http.kali.org/kali/pool/main/b/bind9/bind9-host_9.20.29-1_armhf.deb",
+        "source_package": "bind9"
+      },
+      {
+        "name": "bind9-libs",
+        "version": "1:9.20.29-1",
+        "file": "debs/bind9-libs_9.20.29-1_armhf.deb",
+        "sha256": "e8fd9678fb620324a8c5b1c5924fae6b51af7fc68f54dedb5bc9a4681b4c9d4b",
+        "size": 1103680,
+        "url": "https://http.kali.org/kali/pool/main/b/bind9/bind9-libs_9.20.29-1_armhf.deb",
+        "source_package": "bind9"
+      },
+      {
+        "name": "bluez",
+        "version": "5.87-5",
+        "file": "debs/bluez_5.87-5_armhf.deb",
+        "sha256": "a2f5c3125844516f7b8c658e1df0637e6f93384b9bf62a354bd6c6faedcde54e",
+        "size": 1480696,
+        "url": "https://http.kali.org/kali/pool/main/b/bluez/bluez_5.87-5_armhf.deb",
+        "source_package": "bluez"
+      },
+      {
+        "name": "libbcg729-0",
+        "version": "1.1.2-1",
+        "file": "debs/libbcg729-0_1.1.2-1_armhf.deb",
+        "sha256": "2aca5e2e7de35a3beb95923b16f8a89b3e5ae4e8810567f29fe57fca707a4279",
+        "size": 31708,
+        "url": "https://http.kali.org/kali/pool/main/b/bcg729/libbcg729-0_1.1.2-1_armhf.deb",
+        "source_package": "bcg729"
+      },
+      {
+        "name": "libc-bin",
+        "version": "2.43-7",
+        "file": "debs/libc-bin_2.43-7_armhf.deb",
+        "sha256": "0861c05fe71236ad76ed5970a736f5bb2ecfb70be84239ae1a350d3167556bf3",
+        "size": 511344,
+        "url": "https://http.kali.org/kali/pool/main/g/glibc/libc-bin_2.43-7_armhf.deb",
+        "source_package": "glibc"
+      },
+      {
+        "name": "libc-dev-bin",
+        "version": "2.43-7",
+        "file": "debs/libc-dev-bin_2.43-7_armhf.deb",
+        "sha256": "4910e2901fbe509e8aafce9a3b576df3a60d262da60a8ee4add60349eedef063",
+        "size": 38284,
+        "url": "https://http.kali.org/kali/pool/main/g/glibc/libc-dev-bin_2.43-7_armhf.deb",
+        "source_package": "glibc"
+      },
+      {
+        "name": "libc-gconv-modules-extra",
+        "version": "2.43-7",
+        "file": "debs/libc-gconv-modules-extra_2.43-7_armhf.deb",
+        "sha256": "c7982f19124b0a4d8c36198d2e24b857a88056822fa96df75a16122068f281d6",
+        "size": 1139324,
+        "url": "https://http.kali.org/kali/pool/main/g/glibc/libc-gconv-modules-extra_2.43-7_armhf.deb",
+        "source_package": "glibc"
+      },
+      {
+        "name": "libc-l10n",
+        "version": "2.43-7",
+        "file": "debs/libc-l10n_2.43-7_all.deb",
+        "sha256": "85ea888550215f237776ba74b0a7294cca4e707532800740ff227b71d3d3d344",
+        "size": 750860,
+        "url": "https://http.kali.org/kali/pool/main/g/glibc/libc-l10n_2.43-7_all.deb",
+        "source_package": "glibc"
+      },
+      {
+        "name": "libc6",
+        "version": "2.43-7",
+        "file": "debs/libc6_2.43-7_armhf.deb",
+        "sha256": "5d6117995d198490f9ec2ed1c628d8adeebda0cec332de0f984983316521a0e3",
+        "size": 1539228,
+        "url": "https://http.kali.org/kali/pool/main/g/glibc/libc6_2.43-7_armhf.deb",
+        "source_package": "glibc"
+      },
+      {
+        "name": "libc6-dev",
+        "version": "2.43-7",
+        "file": "debs/libc6-dev_2.43-7_armhf.deb",
+        "sha256": "62b030252d87b92ee9d21f7cbe581d3a5b6e268c0d08760a06cb15292ab7563e",
+        "size": 1401936,
+        "url": "https://http.kali.org/kali/pool/main/g/glibc/libc6-dev_2.43-7_armhf.deb",
+        "source_package": "glibc"
+      },
+      {
+        "name": "libcares2",
+        "version": "1.34.8-1",
+        "file": "debs/libcares2_1.34.8-1_armhf.deb",
+        "sha256": "83031f06f99ae64b53ab0de7955654ccf22202024ef55607fefebf3112a87eb7",
+        "size": 81548,
+        "url": "https://http.kali.org/kali/pool/main/c/c-ares/libcares2_1.34.8-1_armhf.deb",
+        "source_package": "c-ares"
+      },
+      {
+        "name": "libfalcosecurity0.23",
+        "version": "0.23.2-6",
+        "file": "debs/libfalcosecurity0.23_0.23.2-6_armhf.deb",
+        "sha256": "d7710abe20f48c510b04129d7c58ac215b3a88959240ef01ca8706e5a8b21458",
+        "size": 746780,
+        "url": "https://http.kali.org/kali/pool/main/f/falcosecurity-libs/libfalcosecurity0.23_0.23.2-6_armhf.deb",
+        "source_package": "falcosecurity-libs"
+      },
+      {
+        "name": "libfstrm0",
+        "version": "0.6.1-1+b4",
+        "file": "debs/libfstrm0_0.6.1-1+b4_armhf.deb",
+        "sha256": "9d6c4fc04fcde358e0291a8c820db794cba9aac23ff892fb8c8a0bdc8e434a7f",
+        "size": 18764,
+        "url": "https://http.kali.org/kali/pool/main/f/fstrm/libfstrm0_0.6.1-1+b4_armhf.deb",
+        "source_package": "fstrm (0.6.1-1)"
+      },
+      {
+        "name": "libjs-sphinxdoc",
+        "version": "9.1.0-9",
+        "file": "debs/libjs-sphinxdoc_9.1.0-9_all.deb",
+        "sha256": "4872e8c4069d908912123853d92b543bc3741234545912269f3890b73f69b62a",
+        "size": 46288,
+        "url": "https://http.kali.org/kali/pool/main/s/sphinx/libjs-sphinxdoc_9.1.0-9_all.deb",
+        "source_package": "sphinx"
+      },
+      {
+        "name": "libjson-c5",
+        "version": "0.19+ds-1",
+        "file": "debs/libjson-c5_0.19+ds-1_armhf.deb",
+        "sha256": "fd9591e251f8b66eec5f5aea7ff948436e057168c3d237791ff47b44db7bd783",
+        "size": 42660,
+        "url": "https://http.kali.org/kali/pool/main/j/json-c/libjson-c5_0.19+ds-1_armhf.deb",
+        "source_package": "json-c"
+      },
+      {
+        "name": "liblmdb0",
+        "version": "0.9.35-1",
+        "file": "debs/liblmdb0_0.9.35-1_armhf.deb",
+        "sha256": "8d08d5f40dfa4b736a6a108ab1fc618b787424c5c7634ed15d815290fcc2e674",
+        "size": 38072,
+        "url": "https://http.kali.org/kali/pool/main/l/lmdb/liblmdb0_0.9.35-1_armhf.deb",
+        "source_package": "lmdb"
+      },
+      {
+        "name": "libmaxminddb0",
+        "version": "1.13.3-1",
+        "file": "debs/libmaxminddb0_1.13.3-1_armhf.deb",
+        "sha256": "916a64171fb969bd94959b469a92f2ef66c48a552bc288af373aa80c17e96161",
+        "size": 24764,
+        "url": "https://http.kali.org/kali/pool/main/libm/libmaxminddb/libmaxminddb0_1.13.3-1_armhf.deb",
+        "source_package": "libmaxminddb"
+      },
+      {
+        "name": "libnet9",
+        "version": "1.3+dfsg-3+b2",
+        "file": "debs/libnet9_1.3+dfsg-3+b2_armhf.deb",
+        "sha256": "7b425bf43c2ff0ddaef8301fb50637035b0039c996445aef7f710f1c7f7a0298",
+        "size": 44672,
+        "url": "https://http.kali.org/kali/pool/main/libn/libnet/libnet9_1.3+dfsg-3+b2_armhf.deb",
+        "source_package": "libnet (1.3+dfsg-3)"
+      },
+      {
+        "name": "libopencore-amrnb0",
+        "version": "0.1.6-1+b3",
+        "file": "debs/libopencore-amrnb0_0.1.6-1+b3_armhf.deb",
+        "sha256": "b6d334c4ba539b5d70e0db6c226da1502ea953624818ffe6af0fa7a2d2ce4990",
+        "size": 83808,
+        "url": "https://http.kali.org/kali/pool/main/o/opencore-amr/libopencore-amrnb0_0.1.6-1+b3_armhf.deb",
+        "source_package": "opencore-amr (0.1.6-1)"
+      },
+      {
+        "name": "libpcre2-8-0",
+        "version": "10.48-3.1",
+        "file": "debs/libpcre2-8-0_10.48-3.1_armhf.deb",
+        "sha256": "646b37e4422e87668423fac1768a6f214fd268d24805e77f462579a4ca25e844",
+        "size": 265816,
+        "url": "https://http.kali.org/kali/pool/main/p/pcre2/libpcre2-8-0_10.48-3.1_armhf.deb",
+        "source_package": "pcre2"
+      },
+      {
+        "name": "libprotobuf-c1",
+        "version": "1.5.1-1+b2",
+        "file": "debs/libprotobuf-c1_1.5.1-1+b2_armhf.deb",
+        "sha256": "dda8f0e8b22d54047545dc93e8c99b72bfdba088659f69e93dd968fc7c56a90e",
+        "size": 18016,
+        "url": "https://http.kali.org/kali/pool/main/p/protobuf-c/libprotobuf-c1_1.5.1-1+b2_armhf.deb",
+        "source_package": "protobuf-c (1.5.1-1)"
+      },
+      {
+        "name": "libre2-11",
+        "version": "20251105-1+b3",
+        "file": "debs/libre2-11_20251105-1+b3_armhf.deb",
+        "sha256": "6b55327a931144e45ed791e4c3d31f1b7a8cfc76f5b28fcf9e601e5ed33d063f",
+        "size": 138504,
+        "url": "https://http.kali.org/kali/pool/main/r/re2/libre2-11_20251105-1+b3_armhf.deb",
+        "source_package": "re2 (20251105-1)"
+      },
+      {
+        "name": "libsbc1",
+        "version": "2.1-1+b2",
+        "file": "debs/libsbc1_2.1-1+b2_armhf.deb",
+        "sha256": "d847e4b74655eca76edbeff977fba4b12bc2442d07a22faf5c1edfd05553681d",
+        "size": 24576,
+        "url": "https://http.kali.org/kali/pool/main/s/sbc/libsbc1_2.1-1+b2_armhf.deb",
+        "source_package": "sbc (2.1-1)"
+      },
+      {
+        "name": "libsmi2t64",
+        "version": "0.4.8+dfsg2-18+b1",
+        "file": "debs/libsmi2t64_0.4.8+dfsg2-18+b1_armhf.deb",
+        "sha256": "4c34e5d8a942198578d9672edfbe377f08e8bea29a2b4165bb00b469c4566715",
+        "size": 107756,
+        "url": "https://http.kali.org/kali/pool/main/libs/libsmi/libsmi2t64_0.4.8+dfsg2-18+b1_armhf.deb",
+        "source_package": "libsmi (0.4.8+dfsg2-18)"
+      },
+      {
+        "name": "libsnappy1v5",
+        "version": "1.3.1-3",
+        "file": "debs/libsnappy1v5_1.3.1-3_armhf.deb",
+        "sha256": "4fa6803385e202707daa5607636d25bb52884e89b882a1ed8e36fb19c22d78ca",
+        "size": 29396,
+        "url": "https://http.kali.org/kali/pool/main/s/snappy/libsnappy1v5_1.3.1-3_armhf.deb",
+        "source_package": "snappy"
+      },
+      {
+        "name": "libspandsp2t64",
+        "version": "0.0.6+dfsg-2.2+b2",
+        "file": "debs/libspandsp2t64_0.0.6+dfsg-2.2+b2_armhf.deb",
+        "sha256": "3b8747fc66333ad73ff341b0342443eda15c7c56085820220b88c68b00d1f72f",
+        "size": 242892,
+        "url": "https://http.kali.org/kali/pool/main/s/spandsp/libspandsp2t64_0.0.6+dfsg-2.2+b2_armhf.deb",
+        "source_package": "spandsp (0.0.6+dfsg-2.2)"
+      },
+      {
+        "name": "libspeexdsp1",
+        "version": "1.2.1-4",
+        "file": "debs/libspeexdsp1_1.2.1-4_armhf.deb",
+        "sha256": "651140f8a6757797b5432830bc8a9422a45f2752af4f8890aed93da1d6a855f5",
+        "size": 35428,
+        "url": "https://http.kali.org/kali/pool/main/s/speexdsp/libspeexdsp1_1.2.1-4_armhf.deb",
+        "source_package": "speexdsp"
+      },
+      {
+        "name": "libtbb12",
+        "version": "2023.1.0-3",
+        "file": "debs/libtbb12_2023.1.0-3_armhf.deb",
+        "sha256": "efd7690da28ddaaa2c783097e08b6c8c68061e26fdf06bffa9f28d24d843dd92",
+        "size": 83232,
+        "url": "https://http.kali.org/kali/pool/main/o/onetbb/libtbb12_2023.1.0-3_armhf.deb",
+        "source_package": "onetbb"
+      },
+      {
+        "name": "libtbbbind-2-5",
+        "version": "2023.1.0-3",
+        "file": "debs/libtbbbind-2-5_2023.1.0-3_armhf.deb",
+        "sha256": "9732c0cc77042d8fa8b043d1e1ac9b25fdb30ebbefe7d83138720807045c4ec4",
+        "size": 11792,
+        "url": "https://http.kali.org/kali/pool/main/o/onetbb/libtbbbind-2-5_2023.1.0-3_armhf.deb",
+        "source_package": "onetbb"
+      },
+      {
+        "name": "libtbbmalloc2",
+        "version": "2023.1.0-3",
+        "file": "debs/libtbbmalloc2_2023.1.0-3_armhf.deb",
+        "sha256": "dd3083a5f8e2dada0bad7e6d9428bf2368862d3bd1a70509ee38105de24bbfa7",
+        "size": 42532,
+        "url": "https://http.kali.org/kali/pool/main/o/onetbb/libtbbmalloc2_2023.1.0-3_armhf.deb",
+        "source_package": "onetbb"
+      },
+      {
+        "name": "liburcu8t64",
+        "version": "0.15.7-1",
+        "file": "debs/liburcu8t64_0.15.7-1_armhf.deb",
+        "sha256": "d5520eb929ff2562d219329b50eaee50e064274b02f9d130c73fd1f655054656",
+        "size": 71020,
+        "url": "https://http.kali.org/kali/pool/main/libu/liburcu/liburcu8t64_0.15.7-1_armhf.deb",
+        "source_package": "liburcu"
+      },
+      {
+        "name": "libwireshark-data",
+        "version": "4.6.9-1",
+        "file": "debs/libwireshark-data_4.6.9-1_all.deb",
+        "sha256": "0501043deefa9b6a9ed5c229be00ca201ef4ad083d54430e48e6425424272d13",
+        "size": 462564,
+        "url": "https://http.kali.org/kali/pool/main/w/wireshark/libwireshark-data_4.6.9-1_all.deb",
+        "source_package": "wireshark"
+      },
+      {
+        "name": "libwireshark19",
+        "version": "4.6.9-1+b1",
+        "file": "debs/libwireshark19_4.6.9-1+b1_armhf.deb",
+        "sha256": "191f1b69526c126c15713af4d68af3db77ab45bacd85d184550c04187dc2a48c",
+        "size": 16718360,
+        "url": "https://http.kali.org/kali/pool/main/w/wireshark/libwireshark19_4.6.9-1+b1_armhf.deb",
+        "source_package": "wireshark (4.6.9-1)"
+      },
+      {
+        "name": "libwiretap16",
+        "version": "4.6.9-1+b1",
+        "file": "debs/libwiretap16_4.6.9-1+b1_armhf.deb",
+        "sha256": "998a9eccd1382ad7f92475fe7d83fc464cf98b14d068a720f133ef954fc5188b",
+        "size": 264808,
+        "url": "https://http.kali.org/kali/pool/main/w/wireshark/libwiretap16_4.6.9-1+b1_armhf.deb",
+        "source_package": "wireshark (4.6.9-1)"
+      },
+      {
+        "name": "libwsutil17",
+        "version": "4.6.9-1+b1",
+        "file": "debs/libwsutil17_4.6.9-1+b1_armhf.deb",
+        "sha256": "8f780dc36743c0e9f0a3a5551466adf26c150f5016fe0d4c38c3b310a5a61b74",
+        "size": 148548,
+        "url": "https://http.kali.org/kali/pool/main/w/wireshark/libwsutil17_4.6.9-1+b1_armhf.deb",
+        "source_package": "wireshark (4.6.9-1)"
+      },
+      {
+        "name": "locales",
+        "version": "2.43-7",
+        "file": "debs/locales_2.43-7_all.deb",
+        "sha256": "1ea4f7b9b4177e1c0a3b2a7b1fe3d98430e4e55cd7a5ad5ab0b18bf377ca2c1c",
+        "size": 3913276,
+        "url": "https://http.kali.org/kali/pool/main/g/glibc/locales_2.43-7_all.deb",
+        "source_package": "glibc"
+      },
+      {
+        "name": "netcat-openbsd",
+        "version": "1.238-1",
+        "file": "debs/netcat-openbsd_1.238-1_armhf.deb",
+        "sha256": "3008268ad69fae05b89f721602b777100420d856f63adbf066911ec1f8fa488d",
+        "size": 36824,
+        "url": "https://http.kali.org/kali/pool/main/n/netcat-openbsd/netcat-openbsd_1.238-1_armhf.deb",
+        "source_package": "netcat-openbsd"
+      },
+      {
+        "name": "python3-bleak",
+        "version": "3.0.2-2",
+        "file": "debs/python3-bleak_3.0.2-2_all.deb",
+        "sha256": "4fc7d23b866f6d02abe352a93536a9b7862c00c391126e59c0f807dc4468ab27",
+        "size": 110640,
+        "url": "https://http.kali.org/kali/pool/main/b/bleak/python3-bleak_3.0.2-2_all.deb",
+        "source_package": "bleak"
+      },
+      {
+        "name": "python3-dbus-fast",
+        "version": "5.2.0-1",
+        "file": "debs/python3-dbus-fast_5.2.0-1_armhf.deb",
+        "sha256": "3d7ef6101ea996a97739c38071f31ef612efd5bef1f347494b1b4de884a561aa",
+        "size": 616848,
+        "url": "https://http.kali.org/kali/pool/main/d/dbus-fast/python3-dbus-fast_5.2.0-1_armhf.deb",
+        "source_package": "dbus-fast"
+      },
+      {
+        "name": "python3-scapy",
+        "version": "2.7.0+dfsg1-1",
+        "file": "debs/python3-scapy_2.7.0+dfsg1-1_all.deb",
+        "sha256": "819c15750ee6056060d5b286f5ef00a469b977acce0fa965e55aa1f617dc7cac",
+        "size": 2002220,
+        "url": "https://http.kali.org/kali/pool/main/s/scapy/python3-scapy_2.7.0+dfsg1-1_all.deb",
+        "source_package": "scapy"
+      },
+      {
+        "name": "python3-serial",
+        "version": "3.5-2",
+        "file": "debs/python3-serial_3.5-2_all.deb",
+        "sha256": "55adf00b96ef91b1d8ad935d134c341f7c3dd021a5666cd53e75f37144006a51",
+        "size": 88228,
+        "url": "https://http.kali.org/kali/pool/main/p/pyserial/python3-serial_3.5-2_all.deb",
+        "source_package": "pyserial"
+      },
+      {
+        "name": "tcpdump",
+        "version": "4.99.6-2",
+        "file": "debs/tcpdump_4.99.6-2_armhf.deb",
+        "sha256": "221562afc02919e328de35e66556d8a5e20bc18c7d3546dda0d6bc1a58170f8d",
+        "size": 419300,
+        "url": "https://http.kali.org/kali/pool/main/t/tcpdump/tcpdump_4.99.6-2_armhf.deb",
+        "source_package": "tcpdump"
+      },
+      {
+        "name": "tshark",
+        "version": "4.6.9-1+b1",
+        "file": "debs/tshark_4.6.9-1+b1_armhf.deb",
+        "sha256": "c20be28c0309e60d699910d94b610754297c8a7c42295f5614cce4f7fe2b3188",
+        "size": 176736,
+        "url": "https://http.kali.org/kali/pool/main/w/wireshark/tshark_4.6.9-1+b1_armhf.deb",
+        "source_package": "wireshark (4.6.9-1)"
+      },
+      {
+        "name": "wireshark-common",
+        "version": "4.6.9-1+b1",
+        "file": "debs/wireshark-common_4.6.9-1+b1_armhf.deb",
+        "sha256": "47d0cde9d7b7554bfcc8bccdd5c6ec638eb2e8af090f18a3b64e120c14342501",
+        "size": 617916,
+        "url": "https://http.kali.org/kali/pool/main/w/wireshark/wireshark-common_4.6.9-1+b1_armhf.deb",
+        "source_package": "wireshark (4.6.9-1)"
+      }
+    ],
+    "signed_index": true
+  }
+}

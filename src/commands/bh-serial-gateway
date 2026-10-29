@@ -1,0 +1,168 @@
+#!/usr/bin/env python3
+
+import os
+import pty
+import select
+import signal
+import termios
+import sys
+import time
+
+UART = "/dev/ttyS0"
+
+ACTIVE_TOKEN = b"\x00BHCTL:ACTIVE\x00"
+MUTE_TOKEN   = b"\x00BHCTL:MUTE\x00"
+PANEL_TOKEN = b"\x00BHCTL:PANEL\x00"
+PANEL_COMMAND = b"stty rows 40 cols 80; TERM=linux /usr/local/bin/bh-panel > /dev/tty1 2>&1\n"
+
+
+bh_active = False
+running = True
+candidate = bytearray()
+
+def configure_uart(fd):
+    attrs = termios.tcgetattr(fd)
+
+    attrs[0] = 0
+    attrs[1] = 0
+    attrs[2] = termios.CS8 | termios.CREAD | termios.CLOCAL
+    attrs[3] = 0
+
+    attrs[4] = termios.B115200
+    attrs[5] = termios.B115200
+
+    attrs[6][termios.VMIN] = 1
+    attrs[6][termios.VTIME] = 0
+
+    termios.tcsetattr(fd, termios.TCSANOW, attrs)
+    termios.tcflush(fd, termios.TCIOFLUSH)
+
+def stop_handler(signum, frame):
+    global running
+    running = False
+
+signal.signal(signal.SIGTERM, stop_handler)
+signal.signal(signal.SIGINT, stop_handler)
+
+uart = os.open(
+    UART,
+    os.O_RDWR | os.O_NOCTTY | os.O_NONBLOCK
+)
+
+configure_uart(uart)
+
+pid, shell_fd = pty.fork()
+
+if pid == 0:
+    os.environ["TERM"] = "vt100"
+    os.environ["BH_SERIAL_GATEWAY"] = "1"
+    # The boot home screen uses this gateway's existing PTY. Flipper PANEL
+    # requests therefore resume it, and PC serial keys reach the same panel.
+    # Exit/Ctrl+C (or startup failure) returns to a normal recovery shell.
+    os.execl("/bin/bash", "bash", "-l", "-c",
+             PANEL_COMMAND.decode("ascii") + "exec /bin/bash -l")
+
+os.set_blocking(shell_fd, False)
+
+def panel_running():
+    # Only resume a panel inside this gateway's own PTY session.
+    from pathlib import Path
+    for item in Path('/proc').iterdir():
+        if not item.name.isdigit():continue
+        try:
+            if os.getsid(int(item.name))!=pid:continue
+            args=(item/'cmdline').read_bytes().split(b'\0')
+            if b'/usr/local/lib/bh-interactive/bh_panel.py' in args:return True
+        except (OSError,ValueError):continue
+    return False
+
+def uart_input(data):
+    global bh_active, candidate
+    output = bytearray()
+    for b in data:
+        if candidate:
+            candidate.append(b)
+            c=bytes(candidate)
+            if c==ACTIVE_TOKEN:
+                bh_active=True
+                candidate.clear()
+                continue
+            if c==MUTE_TOKEN:
+                # Legacy name means BH released control, never mute the PC.
+                bh_active=False
+                candidate.clear()
+                continue
+            if c==PANEL_TOKEN:
+                if not panel_running():output.extend(PANEL_COMMAND)
+                candidate.clear()
+                continue
+            if any(token.startswith(c) for token in (ACTIVE_TOKEN,MUTE_TOKEN,PANEL_TOKEN)):
+                continue
+            output.extend(candidate)
+            candidate.clear()
+            continue
+        if b==0:
+            candidate.append(b)
+            continue
+        output.append(b)
+    if output:
+        try:os.write(shell_fd,output)
+        except OSError:pass
+
+try:
+
+    while running:
+
+        try:
+            readable, _, _ = select.select(
+                [uart, shell_fd],
+                [],
+                [],
+                1
+            )
+        except InterruptedError:
+            continue
+
+        if uart in readable:
+            try:
+                data = os.read(uart, 4096)
+
+                if data:
+                    uart_input(data)
+
+            except BlockingIOError:
+                pass
+            except OSError:
+                pass
+
+        if shell_fd in readable:
+            try:
+                data = os.read(shell_fd, 4096)
+
+                # Serial recovery output is always available, including before BH opens.
+                if data:
+                    os.write(uart, data)
+
+            except BlockingIOError:
+                pass
+            except OSError:
+                break
+
+finally:
+
+    try:
+        os.kill(pid, signal.SIGHUP)
+    except Exception:
+        pass
+
+    try:
+        os.close(shell_fd)
+    except Exception:
+        pass
+
+    try:
+        os.close(uart)
+    except Exception:
+        pass
+
+sys.exit(0)

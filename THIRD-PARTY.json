@@ -1,0 +1,61 @@
+{
+  "schema": 1,
+  "components": [
+    {
+      "name": "flexcache",
+      "version": "0.3",
+      "license": "BSD",
+      "source_url": "https://files.pythonhosted.org/packages/55/b0/8a21e330561c65653d010ef112bf38f60890051d244ede197ddaa08e50c1/flexcache-0.3.tar.gz",
+      "source_file": "vendor/vehicle/sources/flexcache-0.3.tar.gz",
+      "source_sha256": "18743bd5a0621bfe2cf8d519e4c3bfdf57a269c15d1ced3fb4b64e0ff4600656"
+    },
+    {
+      "name": "flexparser",
+      "version": "0.4",
+      "license": "BSD-3-Clause",
+      "source_url": "https://files.pythonhosted.org/packages/82/99/b4de7e39e8eaf8207ba1a8fa2241dd98b2ba72ae6e16960d8351736d8702/flexparser-0.4.tar.gz",
+      "source_file": "vendor/vehicle/sources/flexparser-0.4.tar.gz",
+      "source_sha256": "266d98905595be2ccc5da964fe0a2c3526fbbffdc45b65b3146d75db992ef6b2"
+    },
+    {
+      "name": "obd",
+      "version": "0.7.3",
+      "license": "GPL-2.0-only",
+      "source_url": "https://files.pythonhosted.org/packages/f9/37/3ae6fd261f911fb3292249a876061786a54486cd5899d49b1406c3483921/obd-0.7.3.tar.gz",
+      "source_file": "vendor/vehicle/sources/obd-0.7.3.tar.gz",
+      "source_sha256": "27b8f043376ca700edb98bf5216e2912295ecde0e735b260999f2d9ddf342522"
+    },
+    {
+      "name": "Pint",
+      "version": "0.24.4",
+      "license": "BSD",
+      "source_url": "https://files.pythonhosted.org/packages/20/bb/52b15ddf7b7706ed591134a895dbf6e41c8348171fb635e655e0a4bbb0ea/pint-0.24.4.tar.gz",
+      "source_file": "vendor/vehicle/sources/pint-0.24.4.tar.gz",
+      "source_sha256": "35275439b574837a6cd3020a5a4a73645eb125ce4152a73a2f126bf164b91b80"
+    },
+    {
+      "name": "platformdirs",
+      "version": "4.13.5",
+      "license": "MIT",
+      "source_url": "https://files.pythonhosted.org/packages/58/e6/d0abbb256b44e6a05748c6942511ff67db8dbb068de0c35b24bf1b395b09/platformdirs-4.13.5.tar.gz",
+      "source_file": "vendor/vehicle/sources/platformdirs-4.13.5.tar.gz",
+      "source_sha256": "05831adf87d392760f4b5c3a0a95579ab5a10b18b9b9bd43680dcb47544788a0"
+    },
+    {
+      "name": "pyserial",
+      "version": "3.5",
+      "license": "BSD",
+      "source_url": "https://files.pythonhosted.org/packages/1e/7d/ae3f0a63f41e4d2f6cb66a5b57197850f919f59e558159a4dd3a818f5082/pyserial-3.5.tar.gz",
+      "source_file": "vendor/vehicle/sources/pyserial-3.5.tar.gz",
+      "source_sha256": "3c77e014170dfffbd816e6ffc205e9842efb10be9f58ec16d3e8675b4925cddb"
+    },
+    {
+      "name": "typing_extensions",
+      "version": "4.16.0",
+      "license": "PSF-2.0",
+      "source_url": "https://files.pythonhosted.org/packages/f6/cc/6253133b5bb138fc3306cebfbda2c520f545d36b5be2c7255cc528bb45d6/typing_extensions-4.16.0.tar.gz",
+      "source_file": "vendor/vehicle/sources/typing_extensions-4.16.0.tar.gz",
+      "source_sha256": "dc983d19a509c94dba722ee6abd33940f7c05a89e243c47e907eb4db6f1a43e5"
+    }
+  ]
+}

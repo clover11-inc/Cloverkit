@@ -1,0 +1,292 @@
+#!/bin/bash
+
+set -u
+
+MODE_FILE="$HOME/.config/bh/lcd-mode"
+
+if [ $# -lt 1 ]; then
+    echo "Usage: lcd-run <script> [args...]"
+    exit 1
+fi
+
+NAME="$1"
+shift
+
+if [[ "$NAME" == /* ]]; then
+    SCRIPT="$NAME"
+    BASE="$(basename "$SCRIPT")"
+else
+    NAME="${NAME%.sh}"
+    SCRIPT="/mnt/scripts/${NAME}.sh"
+    BASE="${NAME}.sh"
+fi
+
+if [ ! -f "$SCRIPT" ]; then
+    echo "ERROR: script not found: $SCRIPT"
+    exit 1
+fi
+
+# ------------------------------------------------------------
+# FLIPPER FOREGROUND JOB OWNERSHIP
+#
+# Only the persistent serial-gateway shell uses this asynchronous,
+# pre-emptive path. SSH/direct terminal use remains synchronous.
+#
+# The manager starts a new process session for the LCD workflow.
+# A later Flipper command can therefore TERM exactly that previous
+# Flipper-owned process group, wait for its cleanup, then start the
+# replacement.
+# ------------------------------------------------------------
+
+if [ "${BH_SERIAL_GATEWAY:-0}" = "1" ] && \
+   [ "${BH_FLIPPER_JOB_CHILD:-0}" != "1" ]; then
+    exec /usr/local/bin/bh-flipper-job "$SCRIPT" "$@"
+fi
+
+MODE="$(cat "$MODE_FILE" 2>/dev/null || echo graphical)"
+
+case "$MODE" in
+    graphical|cli) ;;
+    *) MODE="graphical" ;;
+esac
+
+
+# ------------------------------------------------------------
+# Friendly titles
+# ------------------------------------------------------------
+
+SHORT="${BASE%.sh}"
+
+case "$SHORT" in
+    vpn-toggle)          TITLE="VPN" ;;
+    console-toggle)      TITLE="CONSOLE" ;;
+    iperf-toggle)        TITLE="IPERF SERVER" ;;
+    pc-recovery)         TITLE="PC RECOVERY" ;;
+    system)              TITLE="SYSTEM" ;;
+    status)              TITLE="SYSTEM STATUS" ;;
+    net-status)          TITLE="NETWORK STATUS" ;;
+    net-auto)            TITLE="NETWORK AUTO" ;;
+    net-direct)          TITLE="DIRECT NETWORK" ;;
+    net-off)             TITLE="NETWORK OFF" ;;
+
+    usb)                 TITLE="USB DEVICES" ;;
+
+    wifi)                TITLE="WIFI" ;;
+    radio)               TITLE="RADIO STATUS" ;;
+
+    vpn-status)          TITLE="VPN STATUS" ;;
+    vpn-on)              TITLE="VPN CONNECT" ;;
+    vpn-off)             TITLE="VPN DISCONNECT" ;;
+
+    ethernet)            TITLE="ETHERNET" ;;
+
+    health)              TITLE="SYSTEM HEALTH" ;;
+    ip)                  TITLE="IP STATUS" ;;
+    routes)              TITLE="ROUTES" ;;
+
+    serial)              TITLE="SERIAL" ;;
+
+    console-status)      TITLE="CONSOLE STATUS" ;;
+    console-on)          TITLE="CONSOLE ENABLE" ;;
+    console-off)         TITLE="CONSOLE DISABLE" ;;
+
+    pc-status)           TITLE="PC STATUS" ;;
+    pc-test)             TITLE="PC TEST" ;;
+    pc-fix)              TITLE="PC RECOVERY" ;;
+    pc-vd-start)         TITLE="PC DISPLAY START" ;;
+    pc-vd-restart)       TITLE="PC DISPLAY RESTART" ;;
+
+    iperf-server-start)  TITLE="IPERF START" ;;
+    iperf-server-status) TITLE="IPERF STATUS" ;;
+    iperf-server-stop)   TITLE="IPERF STOP" ;;
+
+    path-test)           TITLE="PATH TEST" ;;
+    hosts)               TITLE="HOST DISCOVERY" ;;
+    security-scan)       TITLE="SECURITY SCAN" ;;
+    monitor)             TITLE="MONITOR" ;;
+
+    target-clean)        TITLE="TARGET CLEANUP" ;;
+
+    device-watch)        TITLE="DEVICE WATCH" ;;
+
+    *)
+        TITLE="$(
+            printf '%s' "$SHORT" |
+            tr '-' ' ' |
+            tr '[:lower:]' '[:upper:]'
+        )"
+        ;;
+esac
+
+
+KIND="auto"
+
+case "$SHORT" in
+    system)
+        TITLE="SYSTEM"
+        KIND="system"
+        ;;
+
+    wifi)
+        TITLE="WIFI"
+        KIND="wifi"
+        ;;
+
+    device-watch)
+        TITLE="DEVICE WATCH"
+        KIND="device-watch"
+        ;;
+
+    ethernet)
+        TITLE="ETHERNET"
+        KIND="ethernet"
+        ;;
+
+    hosts)
+        TITLE="HOST DISCOVERY"
+        KIND="hosts"
+        ;;
+
+    security-scan)
+        TITLE="SECURITY SCAN"
+        KIND="security"
+        ;;
+
+    status)
+        KIND="status"
+        ;;
+
+    packet-scan|packet-general|packet-beacon|packet-ndp)
+        TITLE="PACKET SCAN"
+        KIND="packet"
+        ;;
+
+    packet-probes|packet-deauth|packet-eapol|packet-stations|packet-raw)
+        TITLE="PACKET LIVE"
+        KIND="packet-live"
+        ;;
+
+    TARGET-NET-*)
+        TITLE="HOST TARGET"
+        KIND="host-target"
+        ;;
+
+    TARGET-*)
+        TITLE="TARGET FINDER"
+        KIND="target"
+        ;;
+esac
+
+
+FIFO="$(mktemp -u /tmp/lcd-run.XXXXXX)"
+mkfifo "$FIFO"
+
+RENDER_PID=""
+
+cleanup() {
+    # Close our FIFO writer first so the renderer can naturally observe
+    # EOF. Then retire it explicitly if it is still present.
+    exec 3>&- 2>/dev/null || true
+
+    if [ -n "${RENDER_PID:-}" ] && kill -0 "$RENDER_PID" 2>/dev/null; then
+        kill -TERM "$RENDER_PID" 2>/dev/null || true
+
+        for _ in 1 2 3 4 5; do
+            kill -0 "$RENDER_PID" 2>/dev/null || break
+            sleep 0.05
+        done
+
+        if kill -0 "$RENDER_PID" 2>/dev/null; then
+            kill -KILL "$RENDER_PID" 2>/dev/null || true
+        fi
+
+        wait "$RENDER_PID" 2>/dev/null || true
+    fi
+
+    rm -f "$FIFO"
+}
+
+trap cleanup EXIT INT TERM
+
+
+case "$MODE" in
+
+    cli)
+        sudo -n /usr/local/bin/lcd-display-owner text
+        sudo -n /usr/local/lib/bh/lcd-cli.sh \
+            "$TITLE" < "$FIFO" &
+
+        RENDER_PID=$!
+        ;;
+
+    graphical)
+        sudo -n /usr/local/bin/lcd-display-owner graphical
+
+        if [ "$KIND" = "wifi" ]; then
+            sudo -n /usr/local/lib/bh/lcd-wifi.py \
+                < "$FIFO" &
+
+        elif [ "$KIND" = "system" ]; then
+            sudo -n /usr/local/lib/bh/lcd-system.py \
+                < "$FIFO" &
+
+        elif [ "$KIND" = "device-watch" ]; then
+            sudo -n /usr/local/lib/bh/lcd-device-watch.py \
+                < "$FIFO" &
+
+        elif [ "$KIND" = "ethernet" ]; then
+            sudo -n /usr/local/lib/bh/lcd-ethernet.py \
+                < "$FIFO" &
+
+        elif [ "$KIND" = "hosts" ]; then
+            sudo -n /usr/local/lib/bh/lcd-hosts.py \
+                < "$FIFO" &
+
+        elif [ "$KIND" = "security" ]; then
+            sudo -n /usr/local/lib/bh/lcd-security.py \
+                < "$FIFO" &
+
+        elif [ "$KIND" = "packet" ]; then
+            sudo -n /usr/local/lib/bh/lcd-packet.py \
+                < "$FIFO" &
+
+        elif [ "$KIND" = "packet-live" ]; then
+            sudo -n /usr/local/lib/bh/lcd-packet-live.py                 "$SHORT"                 < "$FIFO" &
+
+        elif [ "$KIND" = "host-target" ]; then
+            sudo -n /usr/local/lib/bh/lcd-host-target.py \
+                < "$FIFO" &
+
+        elif [ "$KIND" = "target" ]; then
+            sudo -n /usr/local/lib/bh/lcd-target.py \
+                "$SHORT" \
+                < "$FIFO" &
+        else
+            sudo -n /usr/local/lib/bh/lcd-gui.py \
+                "$TITLE" \
+                "$KIND" \
+                < "$FIFO" &
+        fi
+
+        RENDER_PID=$!
+        ;;
+esac
+
+
+exec 3>"$FIFO"
+
+env BH_LCD_DISPATCHED=1 \
+    BH_LCD_MODE="$MODE" \
+    stdbuf -oL -eL \
+    "$SCRIPT" "$@" \
+    >&3 2>&1
+
+RC=$?
+
+printf '__LCD_RC__=%s\n' "$RC" >&3
+
+exec 3>&-
+
+wait "$RENDER_PID" 2>/dev/null || true
+
+exit "$RC"

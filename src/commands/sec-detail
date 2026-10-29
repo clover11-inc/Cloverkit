@@ -1,0 +1,182 @@
+#!/usr/bin/env python3
+
+import json
+import subprocess
+import sys
+from pathlib import Path
+
+REPORT = Path("/mnt/security/reports/latest.json")
+
+
+def load_host(ip):
+    report = json.loads(
+        REPORT.read_text(encoding="utf-8")
+    )
+
+    return next(
+        (
+            h for h in report.get("hosts", [])
+            if h.get("ip") == ip
+        ),
+        None,
+    )
+
+
+def main():
+    if len(sys.argv) < 3:
+        print("ERROR Invalid security target")
+        return 2
+
+    mode = sys.argv[1]
+    ip = sys.argv[2]
+
+    host = load_host(ip)
+
+    if not host:
+        print("ERROR Host not found in latest scan")
+        return 2
+
+    print(f"IP {ip}")
+    print(
+        "NAME "
+        + str(host.get("hostname") or "--")
+    )
+
+    if mode == "host":
+        findings = host.get("findings", [])
+
+        print("TYPE HOST")
+        print(f"FINDINGS {len(findings)}")
+
+        for f in findings:
+            sev = f.get("severity") or "INFO"
+
+            if sev not in (
+                "CRITICAL",
+                "HIGH",
+                "MEDIUM",
+                "LOW",
+            ):
+                continue
+
+            print(
+                "FINDING "
+                + sev
+                + " "
+                + str(f.get("code") or "")
+                + " "
+                + str(f.get("cve") or "-")
+            )
+
+            if f.get("action"):
+                print(
+                    "ACTION "
+                    + str(f["action"])
+                )
+
+        print("STATE COMPLETE")
+        return 0
+
+    if mode == "cve":
+        if len(sys.argv) < 4:
+            return 2
+
+        cve = sys.argv[3].upper()
+
+        finding = next(
+            (
+                f for f in host.get("findings", [])
+                if str(f.get("cve") or "").upper() == cve
+            ),
+            None,
+        )
+
+        print("TYPE CVE")
+        print(f"CVE {cve}")
+
+        if finding:
+            print(
+                "SEVERITY "
+                + str(finding.get("severity") or "INFO")
+            )
+
+            if finding.get("cvss") is not None:
+                print(
+                    "CVSS "
+                    + str(finding["cvss"])
+                )
+
+            if finding.get("action"):
+                print(
+                    "ACTION "
+                    + str(finding["action"])
+                )
+
+        proc = subprocess.run(
+            [
+                "sudo",
+                "-n",
+                "python3",
+                "/mnt/security/secvalidate.py",
+                "--host",
+                ip,
+                "--cve",
+                cve,
+                "--plan",
+            ],
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+        )
+
+        for line in proc.stdout.splitlines():
+            print("PLAN " + line)
+
+        if proc.returncode:
+            print("ERROR Validation plan failed (exit " + str(proc.returncode) + ")")
+            print("STATE FAILED")
+            return proc.returncode if proc.returncode > 0 else 1
+        print("STATE COMPLETE")
+        return 0
+
+    if mode == "finding":
+        if len(sys.argv) < 4:
+            return 2
+
+        code = sys.argv[3]
+
+        finding = next(
+            (
+                f for f in host.get("findings", [])
+                if f.get("code") == code
+            ),
+            None,
+        )
+
+        print("TYPE FINDING")
+        print(f"CODE {code}")
+
+        if finding:
+            print(
+                "SEVERITY "
+                + str(finding.get("severity") or "INFO")
+            )
+            print(
+                "TITLE "
+                + str(finding.get("title") or "")
+            )
+
+            if finding.get("action"):
+                print(
+                    "ACTION "
+                    + str(finding["action"])
+                )
+
+        print("STATE COMPLETE")
+        return 0
+
+    return 2
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

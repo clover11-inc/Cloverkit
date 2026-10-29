@@ -1,0 +1,118 @@
+#!/bin/bash
+
+set -u
+
+echo
+echo "========================================"
+echo " SYSTEM STATUS"
+echo "========================================"
+
+HOST="$(hostname 2>/dev/null || echo unknown)"
+UPTIME="$(uptime -p 2>/dev/null | sed 's/^up //' || echo unknown)"
+LOAD="$(awk '{print $1" "$2" "$3}' /proc/loadavg 2>/dev/null || echo unknown)"
+
+MEM="$(free -h 2>/dev/null | awk '/^Mem:/ {print $3 " / " $2}')"
+ROOT="$(df -h / 2>/dev/null | awk 'NR==2 {print $3 " / " $2 " (" $5 ")"}')"
+
+TEMP="unknown"
+if [ -r /sys/class/thermal/thermal_zone0/temp ]; then
+    RAW="$(cat /sys/class/thermal/thermal_zone0/temp 2>/dev/null || true)"
+    if [[ "$RAW" =~ ^[0-9]+$ ]]; then
+        TEMP="$(awk -v t="$RAW" 'BEGIN {
+            c=t/1000
+
+            if (c >= 80)
+                state="CRITICAL"
+            else if (c >= 70)
+                state="HOT"
+            else if (c >= 60)
+                state="WARM"
+            else
+                state="OK"
+
+            printf "%.1f°C  %s", c, state
+        }')"
+    fi
+fi
+
+DEFAULT_IF="$(ip route show default 2>/dev/null | awk 'NR==1 {print $5}')"
+GATEWAY="$(ip route show default 2>/dev/null | awk 'NR==1 {print $3}')"
+
+IPADDR="unknown"
+if [ -n "${DEFAULT_IF:-}" ]; then
+    IPADDR="$(
+        ip -4 -o addr show dev "$DEFAULT_IF" scope global 2>/dev/null |
+        awk 'NR==1 {split($4,a,"/"); print a[1]}'
+    )"
+    [ -n "$IPADDR" ] || IPADDR="unknown"
+fi
+
+SSID="N/A"
+SIGNAL="N/A"
+
+if [ "${DEFAULT_IF:-}" = "wlan0" ]; then
+    SSID="$(iwgetid wlan0 -r 2>/dev/null || true)"
+    [ -n "$SSID" ] || SSID="unknown"
+
+    SIGNAL="$(
+        /usr/sbin/iw dev wlan0 link 2>/dev/null |
+        awk '/signal:/ {print $2 " dBm"; exit}'
+    )"
+    [ -n "$SIGNAL" ] || SIGNAL="unknown"
+fi
+
+echo
+printf '%-12s : %s\n' "Host" "$HOST"
+printf '%-12s : %s\n' "Uptime" "$UPTIME"
+printf '%-12s : %s\n' "Load" "$LOAD"
+printf '%-12s : %s\n' "Memory" "${MEM:-unknown}"
+printf '%-12s : %s\n' "Storage" "${ROOT:-unknown}"
+printf '%-12s : %s\n' "Temp" "$TEMP"
+
+echo
+echo "NETWORK"
+echo "----------------------------------------"
+printf '%-12s : %s\n' "Interface" "${DEFAULT_IF:-none}"
+printf '%-12s : %s\n' "IP" "$IPADDR"
+printf '%-12s : %s\n' "Gateway" "${GATEWAY:-none}"
+printf '%-12s : %s\n' "SSID" "$SSID"
+printf '%-12s : %s\n' "Signal" "$SIGNAL"
+
+echo
+echo "RADIOS"
+echo "----------------------------------------"
+
+for IFACE in wlan0 wlan1 wlan2; do
+    if ip link show "$IFACE" >/dev/null 2>&1; then
+        STATE="$(cat "/sys/class/net/$IFACE/operstate" 2>/dev/null || echo unknown)"
+        printf '%-12s : %s\n' "$IFACE" "$STATE"
+    fi
+done
+
+echo
+echo "SERVICES"
+echo "----------------------------------------"
+
+for SERVICE in \
+    bh-serial-gateway \
+    NetworkManager \
+    ssh
+do
+    if systemctl cat "$SERVICE" >/dev/null 2>&1; then
+        STATE="$(systemctl is-active "$SERVICE" 2>/dev/null || true)"
+        printf '%-20s : %s\n' "$SERVICE" "$STATE"
+    fi
+done
+
+echo
+echo "FLIPPER JOB"
+echo "----------------------------------------"
+
+if [ -s /run/bh-flipper-job/active.json ]; then
+    cat /run/bh-flipper-job/active.json
+else
+    echo "none"
+fi
+
+echo
+echo "========================================"

@@ -1,0 +1,13 @@
+[Unit]
+Description=Clear stale CloverKit generated targets
+RequiresMountsFor=/mnt/scripts
+After=mnt.mount
+Before=bh-boot.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/bin/target-clean all
+RemainAfterExit=yes
+
+[Install]
+WantedBy=multi-user.target

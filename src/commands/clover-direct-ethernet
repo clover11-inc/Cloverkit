@@ -1,0 +1,181 @@
+#!/usr/bin/env python3
+"""Direct-cable diagnostics. No DNS, gateway, forwarding or persistent leases."""
+import argparse,fcntl,ipaddress,json,os,re,select,signal,socket,subprocess,sys,tempfile,time
+from pathlib import Path
+sys.path.insert(0,'/usr/local/lib/bh-interactive')
+from cloverkit_direct_neighbors import NeighborEvidence
+IFACE='eth0'; running=True; started=time.monotonic()
+CONFIG=Path('/etc/cloverkit/direct-ethernet.json')
+def log(s):
+    elapsed=int(time.monotonic()-started)
+    print(f'[{elapsed//60:02}:{elapsed%60:02}] {s}',flush=True)
+def run(args,check=False): return subprocess.run(args,capture_output=True,text=True,timeout=4,check=check)
+def data(args): return json.loads(run(args,True).stdout)
+def stop(*_):
+    global running
+    running=False
+
+def settings(target,local):
+    peer=ipaddress.IPv4Address(target); own=ipaddress.IPv4Interface(local)
+    if peer not in own.network or peer==own.ip: raise ValueError('Target must be in the local subnet and have a different IP.')
+    for address in (peer,own.ip):
+        if address.is_multicast or address.is_loopback or address.is_unspecified or address in (own.network.network_address,own.network.broadcast_address):
+            raise ValueError('Use usable unicast host addresses.')
+    return str(peer),str(own)
+
+def observations(line):
+    """Identify ARP senders, never mistake the requested destination for a peer."""
+    mac=re.search(r'\b([0-9a-f]{2}(?::[0-9a-f]{2}){5})\s*>',line,re.I)
+    sender=re.search(r'\btell (\d+\.\d+\.\d+\.\d+)',line)
+    reply=re.search(r'\bReply (\d+\.\d+\.\d+\.\d+) is-at ([0-9a-f:]{17})',line,re.I)
+    if reply: return reply[2].lower(),reply[1]
+    if mac and sender: return mac[1].lower(),sender[1]
+    return None
+
+def terminate(proc):
+    if proc is not None and proc.poll() is None:
+        proc.terminate()
+        try: proc.wait(timeout=1)
+        except subprocess.TimeoutExpired: proc.kill();proc.wait(timeout=1)
+
+def probe(ip,address):
+    log('TESTING: '+ip)
+    ping=run(['ping','-I',IFACE,'-c','1','-W','1',ip])
+    log('PING: reply' if ping.returncode==0 else 'PING: no reply (may be filtered)')
+    for port in (9100,80,443):
+        if not running: break
+        try:
+            with socket.socket() as sock:
+                sock.settimeout(.7);sock.bind((str(ipaddress.ip_interface(address).ip),0));sock.connect((ip,port))
+            log(f'TCP {port}: OPEN')
+        except OSError: log(f'TCP {port}: unavailable')
+    neighbours=run(['ip','neigh','show','to',ip,'dev',IFACE]).stdout.strip()
+    log('ARP: '+(neighbours or 'no neighbour reply observed'))
+
+def main(argv=None):
+    parser=argparse.ArgumentParser(description=__doc__)
+    parser.add_argument('mode',choices=['dhcp','passive','static','configure'],nargs='?',default='dhcp')
+    parser.add_argument('--seconds',type=int,default=120)
+    parser.add_argument('--target');parser.add_argument('--local')
+    args=parser.parse_args(argv)
+    if os.geteuid(): raise RuntimeError('Run with sudo.')
+    if not 1<=args.seconds<=600: raise ValueError('Seconds must be 1..600.')
+    if args.mode=='configure':
+        target,local=settings(args.target,args.local)
+        CONFIG.parent.mkdir(parents=True,exist_ok=True)
+        temporary=CONFIG.with_suffix('.tmp');temporary.write_text(json.dumps({'target':target,'local':local}));temporary.chmod(0o644);os.replace(temporary,CONFIG)
+        log(f'Static test saved: target {target}; BH {local}. No interface changed.');return 0
+    target=None;address='192.168.254.1/24'
+    if args.mode=='static':
+        cfg=json.loads(CONFIG.read_text()) if CONFIG.exists() else {}
+        if not (args.target or cfg.get('target')) or not (args.local or cfg.get('local')):
+            raise ValueError('Configure your direct Ethernet target/local addresses first, or supply --target and --local; no interface changed.')
+        target,address=settings(args.target or cfg.get('target'),args.local or cfg.get('local'))
+    if args.mode!='static' and (args.target or args.local): raise ValueError('Target/local are for static mode only.')
+    for sig in (signal.SIGTERM,signal.SIGINT,signal.SIGHUP): signal.signal(sig,stop)
+    Path('/run/cloverkit').mkdir(exist_ok=True)
+    with open('/run/cloverkit/direct-ethernet.lock','w') as lock:
+        fcntl.flock(lock,fcntl.LOCK_EX|fcntl.LOCK_NB)
+        original=data(['ip','-j','addr','show','dev',IFACE])[0]
+        if original.get('master'): raise RuntimeError('eth0 is part of a bridge/bond; refusing to start.')
+        if any(a.get('scope')=='global' for a in original.get('addr_info',[])):
+            raise RuntimeError('eth0 already has an IP; disconnect its existing network profile first.')
+        if args.mode!='passive':
+            network=ipaddress.ip_interface(address).network
+            for route in data(['ip','-j','-4','route','show','table','all']):
+                dest=route.get('dst','default')
+                if dest=='default': continue
+                try: overlap=network.overlaps(ipaddress.ip_network(dest,strict=False))
+                except ValueError: continue
+                if overlap: raise RuntimeError('Test subnet overlaps an existing route; refusing to start.')
+        if args.mode=='dhcp' and run(['pgrep','-x','dnsmasq']).returncode==0:
+            raise RuntimeError('Another dnsmasq is running; stop the other network tool first.')
+        log(f'DIRECT ETHERNET | {args.mode.upper()} | {args.seconds}s')
+        log('Direct cable to one device only. Centre/Ctrl+C stops.')
+        log('Wi-Fi and USB serial are not changed.')
+        nm=run(['nmcli','-g','GENERAL.NM-MANAGED','device','show',IFACE])
+        managed=nm.returncode==0 and nm.stdout.strip()=='yes'
+        changed_nm=added=False;dhcp=capture=None;neighbors=None
+        try:
+            if managed:
+                run(['nmcli','device','set',IFACE,'managed','no'],True);changed_nm=True
+            run(['ip','link','set',IFACE,'up'],True)
+            if args.mode!='passive':
+                run(['ip','address','add',address,'dev',IFACE],True);added=True
+                log('BH temporary IP: '+address)
+            with tempfile.TemporaryDirectory(prefix='direct-ethernet-',dir='/run/cloverkit') as tmp:
+                neighbors=NeighborEvidence(tmp,log)
+                lease=Path(tmp)/'leases'
+                with open(Path(tmp)/'dhcp.log','w+') as output:
+                    capture=subprocess.Popen(['tcpdump','-ni',IFACE,'-nne','-l','-s','512','arp or (udp port 67 or 68)'],stdout=subprocess.PIPE,stderr=subprocess.DEVNULL)
+                    os.set_blocking(capture.stdout.fileno(),False)
+                    if args.mode=='dhcp':
+                        dhcp=subprocess.Popen(['dnsmasq','--keep-in-foreground','--conf-file=/dev/null','--port=0','--interface='+IFACE,'--bind-interfaces','--except-interface=lo',
+                            '--dhcp-range=192.168.254.10,192.168.254.20,255.255.255.0,2m','--dhcp-option=3','--dhcp-option=6','--dhcp-leasefile='+str(lease),'--pid-file='+tmp+'/pid','--user=root','--log-dhcp'],stdout=output,stderr=subprocess.STDOUT)
+                        log('DHCP: 192.168.254.10-20; no gateway/DNS. Restart test device.')
+                    if target: log('Static target: '+target)
+                    deadline=time.monotonic()+args.seconds;last_link=None;last_report=0;next_probe=0
+                    seen=set();tested=set();buffer=b'';link_seen=False
+                    ownmac=original.get('address','').lower()
+                    while running and time.monotonic()<deadline:
+                        if capture.poll() is not None: raise RuntimeError('Passive capture stopped; check tcpdump/eth0.')
+                        if dhcp is not None and dhcp.poll() is not None:
+                            output.seek(0);raise RuntimeError('DHCP stopped: '+output.read()[-1000:])
+                        try: carrier=Path('/sys/class/net/eth0/carrier').read_text().strip()=='1'
+                        except OSError: carrier=False
+                        if carrier!=last_link:
+                            log('LINK: UP' if carrier else 'LINK: DOWN - no cable or powered peer')
+                            if carrier:
+                                link_seen=True
+                                for line in run(['ethtool',IFACE]).stdout.splitlines():
+                                    if any(k in line for k in ('Speed:','Duplex:','Link detected:')): log(line.strip())
+                            if carrier:neighbors.start()
+                            else:neighbors.stop()
+                            last_link=carrier
+                        neighbors.poll()
+                        ready,_,_=select.select([capture.stdout],[],[],.2)
+                        if ready:
+                            block=os.read(capture.stdout.fileno(),65536);buffer+=block
+                            while b'\n' in buffer:
+                                line,buffer=buffer.split(b'\n',1);line=line.decode(errors='replace')
+                                peer=observations(line)
+                                if peer and peer[0]!=ownmac and peer not in seen:
+                                    seen.add(peer);log(f'OBSERVED: MAC {peer[0]} | IP {peer[1]} (ARP sender)')
+                                if 'BOOTP/DHCP' in line and 'Request' in line: log('DHCP request observed.')
+                        if dhcp is not None and lease.exists():
+                            for line in lease.read_text().splitlines():
+                                fields=line.split()
+                                if len(fields)<4: continue
+                                _,mac,ip,host=fields[:4]
+                                if (mac,ip) in tested: continue
+                                # Only test addresses inside the pool this process supplies.
+                                peerip=ipaddress.IPv4Address(ip)
+                                if not ipaddress.IPv4Address('192.168.254.10')<=peerip<=ipaddress.IPv4Address('192.168.254.20'): continue
+                                tested.add((mac,ip));log(f'LEASE: {ip} | {mac} | {host}');probe(ip,address)
+                        if target and carrier and time.monotonic()>=next_probe:
+                            probe(target,address);next_probe=time.monotonic()+20
+                        if time.monotonic()-last_report>=10:
+                            log(f'LIVE: {int(max(0,deadline-time.monotonic()))}s remaining | ARP peers {len(seen)} | Leases {len(tested)}');last_report=time.monotonic()
+                    log('RESULT: no physical link during test.' if not link_seen else 'RESULT: physical link observed.')
+                    if link_seen and not seen and not tested: log('No peer address observed. A silent/static device may need restart or manual IP.')
+                    if seen and args.mode!='static': log('Use Direct Ethernet - Static for a known/observed IP.')
+        finally:
+            if neighbors is not None:neighbors.stop()
+            terminate(capture);terminate(dhcp)
+            errors=[]
+            if added:
+                result=run(['ip','address','del',address,'dev',IFACE])
+                if result.returncode: errors.append(result.stderr.strip())
+            if changed_nm:
+                result=run(['nmcli','device','set',IFACE,'managed','yes'])
+                if result.returncode: errors.append(result.stderr.strip())
+            if 'UP' not in original.get('flags',[]):
+                result=run(['ip','link','set',IFACE,'down'])
+                if result.returncode: errors.append(result.stderr.strip())
+            log('RESTORED: capture/DHCP stopped; temporary IP removed.' if not errors else 'RESTORE ERROR: '+'; '.join(errors))
+            if args.mode=='dhcp': log('Device may retain its lease; reconnect it to its normal network.')
+            if errors: raise RuntimeError('Ethernet restoration needs attention.')
+    return 0
+if __name__=='__main__':
+    try: sys.exit(main())
+    except Exception as error: log('ERROR: '+str(error));sys.exit(1)

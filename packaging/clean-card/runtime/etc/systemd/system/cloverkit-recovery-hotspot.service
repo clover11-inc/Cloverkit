@@ -1,0 +1,9 @@
+[Unit]
+Description=CloverKit optional recovery hotspot check
+After=NetworkManager.service cloverkit-radio-names.service
+ConditionPathExists=/etc/cloverkit/recovery-hotspot.json
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/bin/cloverkit-recovery-watch
+TimeoutStartSec=65

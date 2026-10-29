@@ -1,0 +1,2494 @@
+#!/usr/bin/env python3
+import sys as _identity_sys
+_identity_sys.path.insert(0,'/usr/local/lib/bh-interactive')
+from cloverkit_radio_identity import assert_layout as _assert_radio_layout
+_assert_radio_layout()
+
+import argparse
+import asyncio
+import json
+import os
+import statistics
+import subprocess
+import sys
+import time
+from collections import Counter, defaultdict
+from pathlib import Path
+
+from bleak import BleakScanner
+
+from functools import partial
+print = partial(print, flush=True)
+
+
+# ============================================================
+# CloverKit Device Watch
+#
+# Passive multi-radio device awareness:
+#
+#   BLE  -> Bleak / BlueZ
+#   WiFi -> existing CloverKit wifi-scan manifest
+#
+# wlan0 is NEVER used for Device Watch Wi-Fi scanning.
+# ============================================================
+
+
+FLIPPER_UUIDS = {
+    "00003081-0000-1000-8000-00805f9b34fb",
+    "00003082-0000-1000-8000-00805f9b34fb",
+    "00003083-0000-1000-8000-00805f9b34fb",
+}
+
+
+TRACKER_NAMES = (
+    "airtag",
+    "smarttag",
+    "smart tag",
+    "tile",
+    "chipolo",
+    "pebblebee",
+)
+
+
+PAYMENT_NAMES = (
+    "square",
+    "sumup",
+    "verifone",
+    "ingenico",
+    "bbpos",
+    "stripe reader",
+    "stripe-reader",
+    "zettle",
+    "paypal here",
+    "pax",
+)
+
+
+TOOL_NAMES = (
+    "hackrf",
+    "yardstick",
+    "yard stick",
+    "proxmark",
+    "chameleon",
+    "ubertooth",
+    "esp32",
+    "esp-32",
+)
+
+
+WIFI_MANIFEST = Path(
+    "/run/cloverkit/wifi-groups.json"
+)
+
+
+# ------------------------------------------------------------
+# Generic helpers
+# ------------------------------------------------------------
+
+# ------------------------------------------------------------
+# Progress
+# ------------------------------------------------------------
+
+_live_output_times = {}
+
+def progress_bar(current, total, label):
+    """
+    Clean single-line progress renderer.
+
+    Uses a full line clear before every redraw so stale
+    characters such as the old done6/done7 bug cannot remain.
+    """
+
+    total = max(float(total or 1), 1.0)
+    current = max(0.0, min(float(current), total))
+
+    width = 20
+    filled = int(
+        round(
+            width * current / total
+        )
+    )
+
+    filled = max(
+        0,
+        min(width, filled),
+    )
+
+    bar = (
+        "█" * filled
+        + "░" * (width - filled)
+    )
+
+    done = current >= total
+
+    line = (
+        f"{label:<18}"
+        f"[{bar}]  "
+        + ("done" if done else "")
+    )
+
+    if sys.stdout.isatty():
+        sys.stdout.write(
+            "\r\033[2K" + line
+        )
+        sys.stdout.flush()
+
+        if done:
+            sys.stdout.write("\n")
+            sys.stdout.flush()
+
+    else:
+        now=time.monotonic()
+        if done or current==0 or now-_live_output_times.get(('progress',label),-999)>=1:
+            _live_output_times[('progress',label)]=now
+            print(f'{label}: {int(current)}/{int(total)}'+(' complete' if done else 's' if label=='Scanning BLE' else ''))
+
+
+def live_event(event, **fields):
+    """
+    Lightweight machine-readable event stream for the graphical
+    Device Watch renderer.
+
+    Normal CLI output remains unchanged and authoritative.
+    """
+
+    if os.environ.get("BH_LCD_MODE") != "graphical":
+        if event=='stage':
+            print('Stage: '+str(fields.get('phase','Working'))+((' · '+str(fields['adapter'])) if fields.get('adapter') else ''))
+        elif event=='ble_device' and fields.get('category'):
+            key=('device',fields.get('address'));now=time.monotonic()
+            if now-_live_output_times.get(key,-999)>=1:
+                _live_output_times[key]=now
+                signal=fields.get('rssi');signal=f'{signal}dBm' if signal is not None else 'signal pending'
+                print(f"LIVE {fields['category']} {fields.get('name') or fields.get('address')} · {signal} · {fields.get('seen',0)} BLE seen")
+        return
+
+    payload = {
+        "event": event,
+        **fields,
+    }
+
+    print(
+        "DEVICE_WATCH_JSON "
+        + json.dumps(
+            payload,
+            separators=(",", ":"),
+        ),
+        flush=True,
+    )
+
+
+def run(*args):
+    return subprocess.run(
+        args,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+    )
+
+
+def command_path(name, fallbacks=()):
+    for path in fallbacks:
+        if os.path.isfile(path) and os.access(path, os.X_OK):
+            return path
+
+    from shutil import which
+    return which(name)
+
+
+def service_active():
+    return (
+        run(
+            "systemctl",
+            "is-active",
+            "--quiet",
+            "bluetooth",
+        ).returncode == 0
+    )
+
+
+def bluetooth_blocked():
+    rfkill = command_path(
+        "rfkill",
+        ("/usr/sbin/rfkill", "/sbin/rfkill"),
+    )
+
+    if not rfkill:
+        return False
+
+    p = run(
+        rfkill,
+        "list",
+        "bluetooth",
+    )
+
+    return "Soft blocked: yes" in p.stdout
+
+
+def adapter_exists(adapter):
+    return os.path.exists(
+        f"/sys/class/bluetooth/{adapter}"
+    )
+
+
+def wifi_interface_exists(interface):
+    return os.path.exists(
+        f"/sys/class/net/{interface}"
+    )
+
+
+# ------------------------------------------------------------
+# BLE
+# ------------------------------------------------------------
+
+def select_bt_adapter(requested=None):
+
+    if requested:
+        if requested not in ("hci0", "hci1"):
+            raise RuntimeError(
+                f"Invalid radio: {requested}"
+            )
+
+        if not adapter_exists(requested):
+            raise RuntimeError(
+                f"{requested} not available"
+            )
+
+        return requested
+
+    if adapter_exists("hci1"):
+        return "hci1"
+
+    if adapter_exists("hci0"):
+        return "hci0"
+
+    raise RuntimeError("NO BLUETOOTH")
+
+
+def valid_rssi(value):
+
+    if value is None:
+        return False
+
+    return -126 <= value <= 20
+
+
+def signal_label(value):
+
+    if value is None:
+        return "?"
+
+    if value >= -50:
+        return "VERY STRONG"
+
+    if value >= -60:
+        return "STRONG"
+
+    if value >= -70:
+        return "GOOD"
+
+    if value >= -80:
+        return "WEAK"
+
+    return "VERY WEAK"
+
+
+def uuid_present(record, *wanted):
+
+    have = {
+        x.lower()
+        for x in record["uuids"]
+    }
+
+    wanted = {
+        x.lower()
+        for x in wanted
+    }
+
+    return bool(
+        have.intersection(wanted)
+    )
+
+
+def manufacturer_payload(record, company_id):
+
+    data = record["manufacturer"].get(
+        company_id
+    )
+
+    if data is None:
+        return b""
+
+    return bytes(data)
+
+
+def service_payload(record, uuid_fragment):
+
+    wanted = uuid_fragment.lower()
+
+    for uuid, data in record[
+        "service_data"
+    ].items():
+
+        if wanted in uuid.lower():
+            return bytes(data)
+
+    return b""
+
+
+def classify_ble(record):
+
+    name = (
+        record["name"]
+        .lower()
+        .strip()
+    )
+
+    uuids = {
+        x.lower()
+        for x in record["uuids"]
+    }
+
+
+    # ========================================================
+    # FLIPPER ZERO
+    #
+    # Strong exact UUID evidence.
+    # Device name is irrelevant.
+    # ========================================================
+
+    matched_flipper = (
+        uuids & FLIPPER_UUIDS
+    )
+
+    if matched_flipper:
+
+        return (
+            "FLIPPER",
+            "HIGH",
+            "Flipper service UUID",
+        )
+
+
+    if "flipper" in name:
+
+        return (
+            "FLIPPER",
+            "POSSIBLE",
+            "Flipper-like advertised name",
+        )
+
+
+    # ========================================================
+    # APPLE FIND MY
+    #
+    # Apple manufacturer ID = 0x004C.
+    #
+    # 0x12 advertisements are strongly associated with
+    # offline Find My-style beaconing.
+    #
+    # 0x07 is broader Apple nearby/proximity behaviour and
+    # therefore deliberately kept informational.
+    # ========================================================
+
+    apple = manufacturer_payload(
+        record,
+        0x004C,
+    )
+
+    if apple:
+
+        if apple[0] == 0x12:
+
+            return (
+                "FIND-MY",
+                "LIKELY",
+                "Apple 0x004C type 0x12",
+            )
+
+
+        if apple[0] == 0x07:
+
+            return (
+                "APPLE NEARBY",
+                "INFO",
+                "Apple 0x004C type 0x07",
+            )
+
+
+    # ========================================================
+    # TILE
+    #
+    # Tile service UUID documented as:
+    #
+    # FEED0001-0000-1000-8000-00805F9B34FB
+    # ========================================================
+
+    if uuid_present(
+        record,
+        "feed0001-0000-1000-8000-00805f9b34fb",
+    ):
+
+        return (
+            "TILE",
+            "HIGH",
+            "Tile FEED0001 service UUID",
+        )
+
+
+    # Tile manufacturer company ID.
+    # Manufacturer alone is less specific.
+    if 0x00C7 in record["manufacturer"]:
+
+        return (
+            "TILE?",
+            "POSSIBLE",
+            "Tile manufacturer ID 0x00C7",
+        )
+
+
+    # ========================================================
+    # SAMSUNG SMARTTAG
+    #
+    # FD5A service is substantially stronger than Samsung
+    # manufacturer ID by itself.
+    # ========================================================
+
+    if uuid_present(
+        record,
+        "0000fd5a-0000-1000-8000-00805f9b34fb",
+    ):
+
+        return (
+            "SMARTTAG",
+            "HIGH",
+            "Samsung SmartTag FD5A service",
+        )
+
+
+    if (
+        "smarttag" in name
+        or "smart tag" in name
+        or "galaxy tag" in name
+    ):
+
+        return (
+            "SMARTTAG?",
+            "POSSIBLE",
+            "SmartTag-like advertised name",
+        )
+
+
+    # Samsung 0x0075 alone is far too broad.
+    if 0x0075 in record["manufacturer"]:
+
+        return (
+            "SAMSUNG BLE",
+            "INFO",
+            "Samsung manufacturer ID 0x0075",
+        )
+
+
+    # ========================================================
+    # OPEN DRONE ID / REMOTE ID
+    #
+    # ASTM Bluetooth Remote ID uses service UUID FFFA.
+    # Application/message payload may begin with 0x0D.
+    # ========================================================
+
+    if uuid_present(
+        record,
+        "0000fffa-0000-1000-8000-00805f9b34fb",
+    ):
+
+        payload = service_payload(
+            record,
+            "fffa",
+        )
+
+        if (
+            payload
+            and payload[0] == 0x0D
+        ):
+
+            return (
+                "DRONE-ID",
+                "HIGH",
+                "OpenDroneID FFFA + 0x0D",
+            )
+
+        return (
+            "DRONE-ID",
+            "POSSIBLE",
+            "Remote-ID FFFA service",
+        )
+
+
+    # ========================================================
+    # NORDIC UART
+    #
+    # Useful technology fingerprint but extremely common.
+    # Never identify a Flipper from this alone.
+    # ========================================================
+
+    if uuid_present(
+        record,
+        "6e400001-b5a3-f393-e0a9-e50e24dcca9e",
+    ):
+
+        return (
+            "NORDIC UART",
+            "INFO",
+            "Nordic UART service",
+        )
+
+
+    # ========================================================
+    # POSSIBLE SKIMMER-ASSOCIATED SERIAL MODULES
+    #
+    # These names are also used by completely legitimate
+    # hobby hardware.
+    #
+    # Therefore NEVER report them as confirmed skimmers.
+    # ========================================================
+
+    if name in {
+        "hc-03",
+        "hc03",
+        "hc-05",
+        "hc05",
+        "hc-06",
+        "hc06",
+    }:
+
+        return (
+            "SKIMMER?",
+            "POSSIBLE",
+            "HC-series serial-module name",
+        )
+
+
+    # ========================================================
+    # PAYMENT TERMINALS / READERS
+    #
+    # Informational only.
+    # Seeing these in retail is completely normal.
+    # ========================================================
+
+    payment_names = (
+        "square",
+        "sumup",
+        "verifone",
+        "ingenico",
+        "bbpos",
+        "stripe reader",
+        "stripe-reader",
+        "zettle",
+        "paypal here",
+        "pax",
+    )
+
+
+    if any(
+        x in name
+        for x in payment_names
+    ):
+
+        return (
+            "PAYMENT",
+            "INFO",
+            "Recognisable payment-device name",
+        )
+
+
+    # ========================================================
+    # SECURITY / RF TOOLS
+    #
+    # Name evidence is spoofable, therefore POSSIBLE only.
+    # ========================================================
+
+    security_names = (
+        "proxmark",
+        "chameleon",
+        "ubertooth",
+        "hackrf",
+        "yardstick",
+        "yard stick",
+        "marauder",
+        "pwnagotchi",
+        "wifi pineapple",
+        "pineapple",
+    )
+
+
+    if any(
+        x in name
+        for x in security_names
+    ):
+
+        return (
+            "RF/SEC TOOL",
+            "POSSIBLE",
+            "Recognisable tool name",
+        )
+
+
+    # ========================================================
+    # DEVELOPMENT HARDWARE
+    #
+    # Interesting, but not suspicious.
+    # ========================================================
+
+    dev_names = (
+        "esp32",
+        "esp-32",
+        "arduino",
+        "nrf52",
+        "nrf528",
+        "raspberry pi",
+    )
+
+
+    if any(
+        x in name
+        for x in dev_names
+    ):
+
+        return (
+            "DEV BOARD",
+            "INFO",
+            "Recognisable development-board name",
+        )
+
+
+    # Existing generic tracker-name fallback.
+    if any(
+        x in name
+        for x in TRACKER_NAMES
+    ):
+
+        return (
+            "TRACKER?",
+            "POSSIBLE",
+            "Known tracker-family name",
+        )
+
+
+    return None
+
+
+async def scan_ble(
+    adapter,
+    duration,
+    progress=None,
+):
+
+    devices = {}
+
+    def callback(device, adv):
+
+        address = device.address.upper()
+
+        rec = devices.setdefault(
+            address,
+            {
+                "address": address,
+                "name": "",
+                "rssis": [],
+                "tx_power": None,
+                "uuids": set(),
+                "manufacturer": {},
+                "service_data": {},
+            },
+        )
+
+        name = adv.local_name or device.name
+
+        if name:
+            rec["name"] = name
+
+        if valid_rssi(adv.rssi):
+            rec["rssis"].append(adv.rssi)
+
+        if adv.tx_power is not None:
+            rec["tx_power"] = adv.tx_power
+
+        for uuid in adv.service_uuids or []:
+            rec["uuids"].add(
+                uuid.lower()
+            )
+
+        for key, value in (
+            adv.manufacturer_data or {}
+        ).items():
+            rec["manufacturer"][key] = bytes(value)
+
+        for key, value in (
+            adv.service_data or {}
+        ).items():
+            rec["service_data"][
+                key.lower()
+            ] = bytes(value)
+
+        classification=classify_ble(rec)
+        live_event(
+            "ble_device",
+            category=classification[0] if classification else None,
+            phase="SCANNING BLE",
+            adapter=adapter,
+            seen=len(devices),
+            address=address,
+            name=rec["name"],
+            rssi=(
+                rec["rssis"][-1]
+                if rec["rssis"]
+                else None
+            ),
+        )
+
+    scanner = BleakScanner(
+        detection_callback=callback,
+        bluez={"adapter": adapter},
+    )
+
+    try:
+        await scanner.start()
+    except BaseException:
+        # Release this scanner's discovery session if start partially succeeded.
+        try: await scanner.stop()
+        except Exception: pass
+        raise
+
+    started = time.monotonic()
+
+    if progress:
+        progress(
+            0,
+            duration,
+            "Scanning BLE",
+        )
+
+    try:
+        while True:
+            elapsed = (
+                time.monotonic()
+                - started
+            )
+
+            if elapsed >= duration:
+                break
+
+            remaining = (
+                duration - elapsed
+            )
+
+            await asyncio.sleep(
+                min(
+                    0.25,
+                    remaining,
+                )
+            )
+
+            if progress:
+                progress(
+                    min(
+                        max(0.0, duration - 0.01),
+                        time.monotonic() - started,
+                    ),
+                    duration,
+                    "Scanning BLE",
+                )
+
+    finally:
+        await scanner.stop()
+
+    if progress:
+        progress(
+            duration,
+            duration,
+            "Scanning BLE",
+        )
+
+    return devices
+
+
+# ------------------------------------------------------------
+# Wi-Fi
+# ------------------------------------------------------------
+
+def mac_prefix(bssid):
+    """
+    Conservative local BSSID-family representation.
+
+    Uses first 5 octets rather than merely the OUI because
+    wifi-scan already groups nearby allocated BSSIDs.
+    """
+
+    parts = bssid.upper().split(":")
+
+    if len(parts) != 6:
+        return ""
+
+    return ":".join(parts[:5])
+
+
+def run_wifi_scan():
+
+    # Device Watch NEVER uses wlan0.
+    if not any(wifi_interface_exists(name) for name in ("wlan1","wlan2")):
+        return {
+            "status": "unavailable",
+            "reason": "wlan1 not available",
+        }
+
+    wifi_scan = command_path(
+        "cloverkit-device-watch-wifi",
+        ("/usr/local/bin/cloverkit-device-watch-wifi",),
+    )
+
+    if not wifi_scan:
+        return {
+            "status": "unavailable",
+            "reason": "Device watch Wi-Fi scanner not installed",
+        }
+
+    best = None
+    last_scan_error = "Wi-Fi scan produced no usable manifest"
+
+    # Normal case is one scan.
+    # Retry once only when the result is suspiciously small.
+    for attempt in range(2):
+
+        try:
+            WIFI_MANIFEST.unlink(
+                missing_ok=True
+            )
+        except Exception:
+            pass
+
+        # Run wifi-scan asynchronously so the graphical Device Watch
+        # display remains visibly alive during the blocking kernel scan
+        # and optional AP-name enrichment.
+        started = time.monotonic()
+
+        p = subprocess.Popen(
+            [wifi_scan],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.PIPE,
+            text=True,
+        )
+
+        while p.poll() is None:
+            elapsed = int(
+                time.monotonic() - started
+            )
+
+            live_event(
+                "wifi_progress",
+                phase="SCANNING WIFI",
+                interface="USB Wi-Fi",
+                attempt=attempt + 1,
+                elapsed=elapsed,
+            )
+
+            time.sleep(1.0)
+
+        _, stderr = p.communicate()
+
+        live_event(
+            "wifi_progress",
+            phase="SCANNING WIFI",
+            interface="USB Wi-Fi",
+            attempt=attempt + 1,
+            elapsed=int(
+                time.monotonic() - started
+            ),
+        )
+
+        if p.returncode != 0:
+            last_scan_error = stderr.strip()[-500:] or "Wi-Fi scan failed (exit " + str(p.returncode) + ")"
+            continue
+
+        if not WIFI_MANIFEST.exists():
+            continue
+
+        try:
+            with WIFI_MANIFEST.open(
+                encoding="utf-8"
+            ) as f:
+                data = json.load(f)
+
+        except Exception:
+            continue
+
+        interface = data.get(
+            "interface",
+            "",
+        )
+
+        # Absolute protection for management radio.
+        if interface == "wlan0":
+            return {
+                "status": "blocked",
+                "reason": "refusing wlan0 manifest",
+            }
+
+        if interface not in ("wlan1","wlan2"):
+            continue
+
+        result = {
+            "status": "ok",
+            "interface": interface,
+            "rows": data.get("rows", []),
+            "groups": data.get("groups", []),
+            "attempts": attempt + 1,
+            "interfaces": data.get("interfaces", [interface]),
+            "coverage": data.get("coverage", []),
+            "coverage_notes": data.get("coverage_notes", []),
+        }
+
+        if (
+            best is None
+            or len(result["rows"])
+            > len(best["rows"])
+        ):
+            best = result
+
+        # Healthy enough population:
+        # don't waste time rescanning.
+        if (
+            len(result["rows"]) >= 10
+            and len(result["groups"]) >= 4
+        ):
+            break
+
+    if best is None:
+        return {
+            "status": "failed",
+            "reason": last_scan_error,
+        }
+
+    # Mark a very small sample so anomaly scoring can
+    # deliberately avoid drawing conclusions from it.
+    best["sample_ok"] = (
+        len(best["rows"]) >= 10
+        and len(best["groups"]) >= 4
+    )
+
+    return best
+
+
+def build_wifi_population(rows):
+
+    by_ssid = defaultdict(list)
+
+    for row in rows:
+
+        ssid = str(
+            row.get("ssid", "")
+        ).strip()
+
+        bssid = str(
+            row.get("bssid", "")
+        ).upper().strip()
+
+        if not ssid or not bssid:
+            continue
+
+        by_ssid[ssid].append(row)
+
+    return by_ssid
+
+
+def group_companions(groups):
+
+    result = {}
+
+    for group in groups:
+
+        members = group.get(
+            "members",
+            [],
+        )
+
+        ssids = {
+            str(m.get("ssid", "")).strip()
+            for m in members
+            if str(m.get("ssid", "")).strip()
+        }
+
+        for member in members:
+
+            bssid = str(
+                member.get("bssid", "")
+            ).upper().strip()
+
+            if bssid:
+                result[bssid] = (
+                    ssids - {
+                        str(
+                            member.get(
+                                "ssid",
+                                "",
+                            )
+                        ).strip()
+                    }
+                )
+
+    return result
+
+
+def analyse_wifi(rows, groups):
+
+    findings = []
+
+    populations = build_wifi_population(
+        rows
+    )
+
+    companions = group_companions(
+        groups
+    )
+
+    # --------------------------------------------------------
+    # Learn companion relationships from physical AP groups.
+    #
+    # Example:
+    #   Campus-Example + Guest-Example
+    #
+    # We only call a companion "expected" when it appears
+    # across multiple physical groups.
+    # --------------------------------------------------------
+
+    companion_expectation = defaultdict(
+        Counter
+    )
+
+    groups_containing_ssid = Counter()
+
+    for group in groups:
+
+        members = group.get(
+            "members",
+            [],
+        )
+
+        ssids = {
+            str(
+                m.get("ssid", "")
+            ).strip()
+            for m in members
+            if str(
+                m.get("ssid", "")
+            ).strip()
+        }
+
+        for ssid in ssids:
+
+            groups_containing_ssid[
+                ssid
+            ] += 1
+
+            for other in (
+                ssids - {ssid}
+            ):
+                companion_expectation[
+                    ssid
+                ][other] += 1
+
+
+    # --------------------------------------------------------
+    # Examine each SSID population.
+    # --------------------------------------------------------
+
+    for ssid, peers in populations.items():
+
+        if len(peers) < 2:
+            continue
+
+
+        security_counts = Counter(
+            str(
+                p.get(
+                    "security",
+                    "UNKNOWN",
+                )
+            )
+            for p in peers
+        )
+
+
+        dominant_security = (
+            security_counts.most_common(1)[0][0]
+            if security_counts
+            else None
+        )
+
+
+        # Require at least two peers agreeing before we
+        # consider this a baseline.
+        dominant_security_count = (
+            security_counts[
+                dominant_security
+            ]
+            if dominant_security
+            else 0
+        )
+
+
+        signals = []
+
+        for peer in peers:
+
+            try:
+                signals.append(
+                    float(
+                        peer.get("sig")
+                    )
+                )
+            except (
+                TypeError,
+                ValueError,
+            ):
+                pass
+
+
+        median_signal = (
+            statistics.median(
+                signals
+            )
+            if signals
+            else None
+        )
+
+
+        # Companion must occur on at least two physical APs.
+        expected_companions = {
+            other
+            for other, count
+            in companion_expectation[
+                ssid
+            ].items()
+            if count >= 2
+        }
+
+
+        for peer in peers:
+
+            score = 0
+            reasons = []
+
+
+            bssid = str(
+                peer.get(
+                    "bssid",
+                    "",
+                )
+            ).upper()
+
+
+            security = str(
+                peer.get(
+                    "security",
+                    "UNKNOWN",
+                )
+            )
+
+
+            # ------------------------------------------------
+            # SECURITY MISMATCH
+            #
+            # This is strong evidence because an impersonating
+            # SSID may reproduce the name but expose different
+            # RSN/security behaviour.
+            # ------------------------------------------------
+
+            if (
+                dominant_security
+                and dominant_security_count >= 2
+                and security
+                != dominant_security
+            ):
+
+                score += 4
+
+                reasons.append(
+                    "security differs from established peers"
+                )
+
+
+            # ------------------------------------------------
+            # COMPANION SSID
+            #
+            # Supporting evidence only.
+            #
+            # Missing a companion can happen legitimately due
+            # to scan timing/range.
+            # ------------------------------------------------
+
+            observed_companions = companions.get(
+                bssid,
+                set(),
+            )
+
+
+            missing = (
+                expected_companions
+                - observed_companions
+            )
+
+
+            if missing:
+
+                score += 1
+
+                reasons.append(
+                    "expected companion SSID absent"
+                )
+
+
+            # ------------------------------------------------
+            # SIGNAL OUTLIER
+            #
+            # Weak supporting evidence only.
+            # ------------------------------------------------
+
+            try:
+                sig = float(
+                    peer.get("sig")
+                )
+            except (
+                TypeError,
+                ValueError,
+            ):
+                sig = None
+
+
+            if (
+                sig is not None
+                and median_signal
+                is not None
+                and sig >= -40
+                and (
+                    sig - median_signal
+                ) >= 25
+            ):
+
+                score += 1
+
+                reasons.append(
+                    "unusually strong vs peers"
+                )
+
+
+            # One weak clue is not worth displaying.
+            if score < 2:
+                continue
+
+
+            if score >= 6:
+
+                confidence = "LIKELY"
+                category = "WIFI ROGUE?"
+
+            elif score >= 4:
+
+                confidence = "POSSIBLE"
+                category = "WIFI ROGUE?"
+
+            else:
+
+                confidence = "INFO"
+                category = "WIFI ANOMALY"
+
+
+            findings.append(
+                {
+                    "category": category,
+                    "confidence": confidence,
+                    "ssid": ssid,
+                    "bssid": bssid,
+                    "security": security,
+                    "signal": sig,
+                    "score": score,
+                    "reasons": reasons,
+                }
+            )
+
+
+    findings.sort(
+        key=lambda x: (
+            x["score"],
+            x["signal"]
+            if x["signal"]
+            is not None
+            else -999,
+        ),
+        reverse=True,
+    )
+
+    return findings
+
+
+# ------------------------------------------------------------
+# Main
+# ------------------------------------------------------------
+
+
+def generate_ble_targets(matches, directory, refresh=True):
+    import re,shlex
+    directory=Path(directory)
+    if not refresh:
+        print('Prior BLE targets retained; this run supplied no fresh BLE observations.',flush=True)
+        return []
+    def safe(value):
+        return re.sub(r'[^A-Z0-9_-]+','-',str(value or '').upper()).strip('-')[:28] or 'DEVICE'
+    generated=[]
+    eligible=[item for item in matches if item.get('category') not in ('FIND-MY','APPLE NEARBY')]
+    priority={'HIGH':0,'LIKELY':1,'POSSIBLE':2,'INFO':3}
+    eligible.sort(key=lambda item:(priority.get(item.get('confidence'),9),-(item.get('best_rssi') if item.get('best_rssi') is not None else -999)))
+    selected=eligible[:12]
+    if len(eligible)>12: print(f'BLE targets: 12 selected of {len(eligible)} classified foreground observations; confidence then signal.',flush=True)
+    for item in selected:
+        confidence=str(item.get('confidence','')).upper()
+        if confidence not in ('HIGH','LIKELY','POSSIBLE','INFO'): continue
+        rec=item['record'];address=str(rec.get('address','')).upper()
+        if not re.fullmatch(r'(?:[0-9A-F]{2}:){5}[0-9A-F]{2}',address): continue
+        category=str(item.get('category') or 'BLE')
+        identity=safe(rec.get('name'))+'-' if rec.get('name') else ''
+        filename=f"TARGET-BLE-{confidence}-{safe(category)}-{identity}{address.replace(':','')}.sh"
+        command=['sudo','-n','/usr/local/bin/device-track',address]
+        if category in ('FLIPPER','SMARTTAG'): command+=['--fingerprint',category.lower()]
+        lines=['#!/bin/bash',"printf '%s\n' "+' '.join(shlex.quote(str(x)) for x in ('BLE TARGET',category+' '+confidence,rec.get('name') or address,address,'Classification is inferred from advertisements.')),
+               'exec '+shlex.join(command),'']
+        path=directory/filename
+        path.write_text('\n'.join(lines),encoding='utf-8');path.chmod(0o755)
+        generated.append(filename)
+    # Only remove old generated targets after all current replacements are written.
+    for old in directory.glob('TARGET-BLE-*.sh'):
+        if old.name not in generated: old.unlink()
+    return generated
+
+def main():
+
+    parser = argparse.ArgumentParser(
+        prog="device-watch"
+    )
+
+    parser.add_argument(
+        "seconds",
+        nargs="?",
+        type=int,
+        default=20,
+    )
+
+    parser.add_argument(
+        "--radio",
+        choices=("hci0", "hci1"),
+    )
+
+    parser.add_argument(
+        "--no-wifi",
+        action="store_true",
+        help="BLE only",
+    )
+
+    parser.add_argument(
+        "--verbose",
+        action="store_true",
+        help="show full detection evidence",
+    )
+
+    parser.add_argument(
+        "--details",
+        action="store_true",
+        help=(
+            "show full passive BLE and Wi-Fi "
+            "observation details"
+        ),
+    )
+
+    parser.add_argument(
+        "--show",
+        metavar="MATCH",
+        help=(
+            "show passive details matching a name, "
+            "category, MAC, BSSID or SSID"
+        ),
+    )
+
+    args = parser.parse_args()
+
+    duration = max(
+        5,
+        min(args.seconds, 120),
+    )
+
+    if os.geteuid() != 0:
+        os.execvp(
+            "sudo",
+            [
+                "sudo",
+                "-n",
+                "/usr/local/bin/device-watch",
+            ] + sys.argv[1:],
+        )
+
+    # --------------------------------------------------------
+    # BLE setup
+    # Prevent repeated Device Watch runs restoring each other's Bluetooth state.
+    import fcntl
+    lock_directory=Path('/run/cloverkit');lock_directory.mkdir(mode=0o755,exist_ok=True)
+    scan_lock=open(lock_directory/'device-watch.lock','a')
+    try: fcntl.flock(scan_lock.fileno(),fcntl.LOCK_EX|fcntl.LOCK_NB)
+    except BlockingIOError:
+        print('Device Watch is already running. Stop it or wait before retrying.',flush=True)
+        return 2
+    # --------------------------------------------------------
+
+    try:
+        bt_adapter = select_bt_adapter(
+            args.radio
+        )
+
+    except RuntimeError as error:
+        bt_adapter = None
+        adapter_error = str(error)
+
+    radio_type = (
+        "USB"
+        if bt_adapter == "hci1"
+        else "ONBOARD"
+    )
+
+    was_active = service_active()
+    was_blocked = bluetooth_blocked()
+
+    ble_devices = {}
+    ble_error = None if bt_adapter else adapter_error
+
+    try:
+
+        if bt_adapter:
+
+            subprocess.run(
+                [
+                    "systemctl",
+                    "start",
+                    "bluetooth",
+                ],
+                check=True,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+            )
+
+            rfkill = command_path(
+                "rfkill",
+                (
+                    "/usr/sbin/rfkill",
+                    "/sbin/rfkill",
+                ),
+            )
+
+            if rfkill:
+
+                subprocess.run(
+                    [
+                        rfkill,
+                        "unblock",
+                        "bluetooth",
+                    ],
+                    check=True,
+                    stdout=subprocess.DEVNULL,
+                    stderr=subprocess.DEVNULL,
+                )
+
+            live_event(
+                "stage",
+                phase="SCANNING BLE",
+                adapter=bt_adapter,
+                duration=duration,
+            )
+
+            from cloverkit_ble_ready import scan_ready, usb_adapter
+            bt_adapter, ble_devices = asyncio.run(
+                scan_ready(bt_adapter, duration, scan_ble, progress=progress_bar,
+                           explicit=bool(args.radio), event=live_event)
+            )
+            radio_type = "USB" if usb_adapter(bt_adapter) else "ONBOARD"
+
+            live_event(
+                "stage",
+                phase="ANALYSING BLE",
+                adapter=bt_adapter,
+                seen=len(ble_devices),
+            )
+
+    except Exception as e:
+        ble_error = type(e).__name__ + ': ' + str(e)
+        print('BLE scan failed: '+ble_error,flush=True)
+        live_event('stage',phase='BLE FAILED',adapter=bt_adapter,error=ble_error)
+
+    finally:
+
+        rfkill = command_path(
+            "rfkill",
+            (
+                "/usr/sbin/rfkill",
+                "/sbin/rfkill",
+            ),
+        )
+
+        if was_blocked and rfkill:
+
+            subprocess.run(
+                [
+                    rfkill,
+                    "block",
+                    "bluetooth",
+                ],
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+            )
+
+        if not was_active:
+
+            subprocess.run(
+                [
+                    "systemctl",
+                    "stop",
+                    "bluetooth",
+                ],
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+            )
+
+    # --------------------------------------------------------
+    # BLE classification
+    # --------------------------------------------------------
+
+    ble_matches = []
+
+    ble_records = list(
+        ble_devices.values()
+    )
+
+    analysis_total = max(
+        1,
+        len(ble_records),
+    )
+
+    if ble_records:
+        progress_bar(
+            0,
+            analysis_total,
+            "Analysing BLE",
+        )
+
+    for analysis_index, rec in enumerate(
+        ble_records,
+        1,
+    ):
+
+        result = classify_ble(rec)
+
+        if not result:
+            progress_bar(
+                analysis_index,
+                analysis_total,
+                "Analysing BLE",
+            )
+            continue
+
+        category, confidence, reason = result
+
+        rssis = rec["rssis"]
+
+        last_rssi = (
+            rssis[-1]
+            if rssis
+            else None
+        )
+
+        best_rssi = (
+            max(rssis)
+            if rssis
+            else None
+        )
+
+        ble_matches.append(
+            {
+                "record": rec,
+                "category": category,
+                "confidence": confidence,
+                "reason": reason,
+                "last_rssi": last_rssi,
+                "best_rssi": best_rssi,
+            }
+        )
+
+        progress_bar(
+            analysis_index,
+            analysis_total,
+            "Analysing BLE",
+        )
+
+    # --------------------------------------------------------
+    # Wi-Fi
+    # --------------------------------------------------------
+
+    if args.no_wifi:
+        wifi_result = {
+            "status": "disabled",
+            "reason": "--no-wifi",
+        }
+
+    else:
+        progress_bar(
+            0,
+            1,
+            "Scanning WiFi",
+        )
+
+        live_event(
+            "stage",
+            phase="SCANNING WIFI",
+            interface="wlan1",
+        )
+
+        wifi_result = run_wifi_scan()
+
+        if wifi_result.get("status") == "ok":
+            live_event(
+                "wifi_result",
+                phase="ANALYSING WIFI",
+                interface=wifi_result.get(
+                    "interface",
+                    "wlan1",
+                ),
+                bssids=len(
+                    wifi_result.get(
+                        "rows",
+                        [],
+                    )
+                ),
+                aps=len(
+                    wifi_result.get(
+                        "groups",
+                        [],
+                    )
+                ),
+            )
+        else:
+            live_event(
+                "stage",
+                phase="WIFI UNAVAILABLE",
+                interface="wlan1",
+            )
+
+        progress_bar(
+            1,
+            1,
+            "Scanning WiFi",
+        )
+
+    # CLOVERKIT_ROADMAP_V1
+    sys.path.insert(0,'/usr/local/lib/bh-interactive')
+    from cloverkit_device_history import record as _record_history
+    def record_history_after_summary():
+        print('',flush=True)
+        try:_record_history(ble_devices,wifi_result,ble_complete=not bool(ble_error) and bool(ble_devices))
+        except (OSError,ValueError,TypeError) as error:print('Device history unavailable: '+str(error),flush=True)
+    wifi_findings = []
+
+    if wifi_result.get("status") == "ok":
+
+        progress_bar(
+            0,
+            1,
+            "Analysing WiFi",
+        )
+
+        if wifi_result.get("sample_ok", True):
+
+            wifi_findings = analyse_wifi(
+                wifi_result["rows"],
+                wifi_result["groups"],
+            )
+
+        else:
+
+            wifi_findings = []
+
+        progress_bar(
+            1,
+            1,
+            "Analysing WiFi",
+        )
+
+    # --------------------------------------------------------
+    # Totals
+    # --------------------------------------------------------
+
+    counts = defaultdict(int)
+
+    for item in ble_matches:
+        counts[
+            item["confidence"]
+        ] += 1
+
+    for item in wifi_findings:
+        counts[
+            item["confidence"]
+        ] += 1
+
+    total_matches = (
+        len(ble_matches)
+        + len(wifi_findings)
+    )
+
+    # --------------------------------------------------------
+    # All classified observations receive tracking targets, including INFO.
+    target_dir=Path('/mnt/scripts')
+    created_ble_targets=generate_ble_targets(ble_matches,target_dir,refresh=not bool(ble_error) and bool(ble_devices))
+
+    # --------------------------------------------------------
+    # Output
+    # --------------------------------------------------------
+
+    show_query = (
+        str(args.show or "")
+        .strip()
+        .lower()
+    )
+
+    details = (
+        args.verbose
+        or args.details
+        or bool(show_query)
+    )
+
+    # Preserve the existing variable for compact/background
+    # presentation behaviour.
+    verbose = details
+
+    # --------------------------------------------------------
+    # Helpers used only for presentation.
+    # --------------------------------------------------------
+
+    def short_uuid(uuid):
+        u = uuid.lower()
+
+        if u.startswith("0000") and len(u) >= 8:
+            return u[4:8].upper()
+
+        return u.split("-")[0].upper()
+
+
+    def ble_identity(item):
+
+        rec = item["record"]
+
+        if rec["name"]:
+            return rec["name"]
+
+        return rec["address"]
+
+
+    def rssi_text(item):
+
+        value = item["last_rssi"]
+
+        if value is None:
+            value = item["best_rssi"]
+
+        if value is None:
+            return ""
+
+        return (
+            f"{value}dBm "
+            f"{signal_label(value)}"
+        )
+
+
+    def compact_evidence(item):
+
+        rec = item["record"]
+        category = item["category"]
+
+        if category == "FLIPPER":
+
+            matched = (
+                rec["uuids"]
+                & FLIPPER_UUIDS
+            )
+
+            if matched:
+                values = ",".join(
+                    short_uuid(x)
+                    for x in sorted(matched)
+                )
+
+                return f"UUID {values}"
+
+
+        if category == "SMARTTAG":
+            return "FD5A service"
+
+        if category == "TILE":
+            return "FEED service"
+
+        if category == "DRONE-ID":
+            return "Remote ID"
+
+        if category == "SKIMMER?":
+            return "HC serial-module signature"
+
+        return item["reason"]
+
+
+    # --------------------------------------------------------
+    # Sort BLE findings.
+    # --------------------------------------------------------
+
+    priority = {
+        "HIGH": 0,
+        "LIKELY": 1,
+        "POSSIBLE": 2,
+        "INFO": 3,
+    }
+
+    ble_matches.sort(
+        key=lambda x: (
+            priority.get(
+                x["confidence"],
+                9,
+            ),
+            -(
+                x["best_rssi"]
+                if x["best_rssi"]
+                is not None
+                else -999
+            ),
+        )
+    )
+
+
+    # High-volume families remain visible in normal mode,
+    # but are summarized rather than dumped individually.
+
+    background_categories = {
+        "FIND-MY",
+        "APPLE NEARBY",
+    }
+
+    background = Counter()
+
+    foreground_ble = []
+
+    for item in ble_matches:
+
+        if (
+            not verbose
+            and item["category"]
+            in background_categories
+        ):
+            background[
+                item["category"]
+            ] += 1
+        else:
+            foreground_ble.append(
+                item
+            )
+
+
+    # --------------------------------------------------------
+    # HEADER
+    # --------------------------------------------------------
+
+    print("DEVICE WATCH")
+
+    wifi_status = wifi_result.get("status")
+
+    ble_label = "unavailable"
+
+    if ble_error:
+        ble_label=f"{bt_adapter or 'no adapter'} FAILED · {ble_error}"
+    elif bt_adapter:
+        ble_label=f"{bt_adapter} ({radio_type}) {len(ble_devices)} seen · {duration}s observed"
+        if not ble_devices:
+            print('BLE: no advertisements received; not evidence that devices are absent.',flush=True)
+
+    if wifi_status == "ok":
+
+        wifi_label = (
+            f"{'+'.join(wifi_result.get('interfaces') or [wifi_result['interface']])} "
+            f"{len(wifi_result['rows'])} BSSIDs / "
+            f"{len(wifi_result['groups'])} APs"
+        )
+
+    elif wifi_status == "disabled":
+
+        wifi_label = "disabled"
+
+    else:
+
+        wifi_label = "unavailable: " + str(wifi_result.get("reason", "No usable scan result"))
+
+
+    print(f"BLE  : {ble_label}")
+    print(f"WiFi : {wifi_label}")
+    for coverage in wifi_result.get('coverage', []):
+        print("WiFi radio: "+coverage['adapter']+" · "+' / '.join(coverage['bands'])+" · "+coverage['status'])
+    for note in wifi_result.get('coverage_notes', []):
+        print('WiFi coverage: '+note)
+
+    print(
+        f"HIGH {counts['HIGH']} | "
+        f"LIKELY {counts['LIKELY']} | "
+        f"POSS {counts['POSSIBLE']} | "
+        f"INFO {counts['INFO']}"
+    )
+
+
+    # ========================================================
+    # NORMAL / COMPACT MODE
+    # ========================================================
+
+    if not verbose:
+
+        if foreground_ble:
+
+            print()
+            print("DETECTED")
+
+            for item in foreground_ble:
+
+                rec = item["record"]
+
+                identity = ble_identity(
+                    item
+                )
+
+                signal = rssi_text(
+                    item
+                )
+
+                line = (
+                    f"{item['confidence']:<8} "
+                    f"{item['category']:<12} "
+                    f"{identity}"
+                )
+
+                if signal:
+                    line += f"  {signal}"
+
+                print(line)
+
+                detail = rec["address"]
+
+                evidence = compact_evidence(
+                    item
+                )
+
+                if evidence:
+                    detail += (
+                        f" | {evidence}"
+                    )
+
+                print(
+                    f"         {detail}"
+                )
+
+
+        if background:
+
+            print()
+            print("BACKGROUND")
+
+            parts = []
+
+            for category in (
+                "FIND-MY",
+                "APPLE NEARBY",
+            ):
+
+                amount = background.get(
+                    category,
+                    0,
+                )
+
+                if amount:
+                    parts.append(
+                        f"{category} {amount}"
+                    )
+
+            if parts:
+                print(
+                    " | ".join(parts)
+                )
+
+
+        if wifi_findings:
+
+            print()
+            print("WIFI ALERTS")
+
+            for item in wifi_findings:
+
+                signal = ""
+
+                if item["signal"] is not None:
+                    signal = (
+                        f"  "
+                        f"{item['signal']:.0f}dBm"
+                    )
+
+                print(
+                    f"{item['confidence']:<8} "
+                    f"{item['ssid']}  "
+                    f"{item['bssid']}"
+                    f"{signal}"
+                )
+
+                why = " | ".join(
+                    item["reasons"]
+                )
+
+                if why:
+                    print(
+                        f"         {why}"
+                    )
+
+        else:
+
+            print()
+            print("WiFi alerts : 0")
+
+
+        if (
+            not foreground_ble
+            and not background
+            and not wifi_findings
+        ):
+
+            print()
+            print("No classified devices.")
+
+
+        print()
+        print(
+            f"Unknown BLE : "
+            f"{max(0, len(ble_devices) - len(ble_matches))}"
+        )
+
+        print(
+            "Passive observation only."
+        )
+
+        if created_ble_targets:
+
+            print()
+            print("RUN TARGET:")
+
+            for filename in created_ble_targets:
+                print(
+                    str(target_dir / filename)
+                )
+
+        record_history_after_summary()
+        return 2 if ble_error else 0
+
+
+    # ========================================================
+    # DETAILS / SHOW MODE
+    # ========================================================
+
+    print()
+    print("DETAIL EVIDENCE")
+
+    if show_query:
+        print(
+            f"Filter           : {args.show}"
+        )
+
+    print(
+        f"BLE scan seconds : {duration}"
+    )
+
+    print(
+        f"BLE observed     : {len(ble_devices)}"
+    )
+
+    print(
+        f"BLE classified   : {len(ble_matches)}"
+    )
+
+    print(
+        f"BLE unknown      : "
+        f"{max(0, len(ble_devices) - len(ble_matches))}"
+    )
+
+    print(
+        f"WiFi observed    : "
+        f"{len(wifi_result.get('rows', []))}"
+    )
+
+    print(
+        f"WiFi findings    : {len(wifi_findings)}"
+    )
+
+
+    def matches_show(*values):
+
+        if not show_query:
+            return True
+
+        for value in values:
+
+            if value is None:
+                continue
+
+            if show_query in str(
+                value
+            ).lower():
+                return True
+
+        return False
+
+
+    # --------------------------------------------------------
+    # BLE: show ALL observed records, not only classified ones.
+    # --------------------------------------------------------
+
+    classified_by_address = {
+        item["record"]["address"]: item
+        for item in ble_matches
+    }
+
+    shown_ble = 0
+
+    for rec in sorted(
+        ble_devices.values(),
+        key=lambda x: (
+            x.get("name") or "",
+            x.get("address") or "",
+        ),
+    ):
+
+        item = classified_by_address.get(
+            rec["address"]
+        )
+
+        category = (
+            item["category"]
+            if item
+            else "UNCLASSIFIED"
+        )
+
+        confidence = (
+            item["confidence"]
+            if item
+            else "INFO"
+        )
+
+        reason = (
+            item["reason"]
+            if item
+            else "No classification rule matched"
+        )
+
+        if not matches_show(
+            rec.get("name"),
+            rec.get("address"),
+            category,
+            confidence,
+            reason,
+            *rec.get("uuids", []),
+        ):
+            continue
+
+        if shown_ble == 0:
+            print()
+            print("BLE OBSERVATIONS")
+
+        shown_ble += 1
+
+        print()
+        print(
+            f"{confidence} {category}"
+        )
+
+        print(
+            f"Name       : "
+            f"{rec.get('name') or '-'}"
+        )
+
+        print(
+            f"Address    : "
+            f"{rec.get('address') or '-'}"
+        )
+
+        rssis = rec.get(
+            "rssis",
+            [],
+        )
+
+        last_rssi = (
+            rssis[-1]
+            if rssis
+            else None
+        )
+
+        best_rssi = (
+            max(rssis)
+            if rssis
+            else None
+        )
+
+        if last_rssi is not None:
+            print(
+                f"RSSI       : "
+                f"{last_rssi} dBm "
+                f"{signal_label(last_rssi)}"
+            )
+        else:
+            print("RSSI       : -")
+
+        if best_rssi is not None:
+            print(
+                f"Best RSSI  : {best_rssi} dBm"
+            )
+
+        print(
+            f"Samples    : {len(rssis)}"
+        )
+
+        tx_power = rec.get(
+            "tx_power"
+        )
+
+        if tx_power not in (
+            None,
+            0,
+        ):
+            print(
+                f"TxPower    : "
+                f"{tx_power}"
+            )
+
+        elif tx_power == 0:
+            print(
+                "TxPower    : -"
+            )
+
+        print(
+            f"Reason     : {reason}"
+        )
+
+        if rec.get("uuids"):
+            print("UUIDs:")
+
+            for uuid in sorted(
+                rec["uuids"]
+            ):
+                print(
+                    f"  {uuid}"
+                )
+
+        if rec.get(
+            "manufacturer"
+        ):
+            print(
+                "Manufacturer data:"
+            )
+
+            for key, value in sorted(
+                rec["manufacturer"].items()
+            ):
+                print(
+                    f"  0x{key:04X}: "
+                    f"{bytes(value).hex()}"
+                )
+
+        if rec.get(
+            "service_data"
+        ):
+            print(
+                "Service data:"
+            )
+
+            for key, value in sorted(
+                rec["service_data"].items()
+            ):
+                print(
+                    f"  {key}: "
+                    f"{bytes(value).hex()}"
+                )
+
+
+    # --------------------------------------------------------
+    # Wi-Fi: show ALL BSSIDs from the passive wifi-scan
+    # manifest, not merely anomaly findings.
+    # --------------------------------------------------------
+
+    shown_wifi = 0
+
+    finding_by_bssid = {
+        str(
+            item.get("bssid", "")
+        ).upper(): item
+        for item in wifi_findings
+        if item.get("bssid")
+    }
+
+    if wifi_status == "ok":
+
+        for row in wifi_result.get(
+            "rows",
+            [],
+        ):
+
+            ssid = str(
+                row.get("ssid", "")
+            )
+
+            bssid = str(
+                row.get("bssid", "")
+            ).upper()
+
+            security = str(
+                row.get("security", "")
+            )
+
+            if not matches_show(
+                ssid,
+                bssid,
+                security,
+                *[
+                    value
+                    for value
+                    in row.values()
+                    if isinstance(
+                        value,
+                        (
+                            str,
+                            int,
+                            float,
+                        ),
+                    )
+                ],
+            ):
+                continue
+
+            if shown_wifi == 0:
+                print()
+                print("WIFI OBSERVATIONS")
+
+            shown_wifi += 1
+
+            print()
+            print(
+                f"SSID       : "
+                f"{ssid or '-'}"
+            )
+
+            print(
+                f"BSSID      : "
+                f"{bssid or '-'}"
+            )
+
+            if security:
+                print(
+                    f"Security   : {security}"
+                )
+
+            if row.get(
+                "sig"
+            ) is not None:
+                print(
+                    f"RSSI       : "
+                    f"{row.get('sig')} dBm"
+                )
+
+            # Print other passive manifest fields so details
+            # remains useful even if wifi-scan adds fields later.
+            skip = {
+                "ssid",
+                "bssid",
+                "security",
+                "sig",
+            }
+
+            for key in sorted(row):
+
+                if key in skip:
+                    continue
+
+                value = row.get(key)
+
+                if value in (
+                    None,
+                    "",
+                    [],
+                    {},
+                ):
+                    continue
+
+                print(
+                    f"{key:<11}: {value}"
+                )
+
+            anomaly = finding_by_bssid.get(
+                bssid
+            )
+
+            if anomaly:
+                print(
+                    f"Finding    : "
+                    f"{anomaly['confidence']} "
+                    f"{anomaly['category']}"
+                )
+
+                for why in anomaly.get(
+                    "reasons",
+                    [],
+                ):
+                    print(
+                        f"Reason     : {why}"
+                    )
+
+
+    if show_query:
+
+        if (
+            shown_ble == 0
+            and shown_wifi == 0
+        ):
+            print()
+            print(
+                "No passive observations matched "
+                f"'{args.show}'."
+            )
+
+        else:
+            print()
+            print(
+                f"Matched BLE  : {shown_ble}"
+            )
+            print(
+                f"Matched WiFi : {shown_wifi}"
+            )
+
+
+    print()
+    print(
+        "Passive observation only."
+    )
+
+    record_history_after_summary()
+    return 2 if ble_error else 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

@@ -1,0 +1,271 @@
+#!/bin/bash
+
+if [ "$EUID" -ne 0 ]; then
+    exec sudo /usr/local/bin/target-build-wifi "$@"
+fi
+
+MANIFEST="/run/cloverkit/wifi-groups.json"
+DIR="/mnt/scripts"
+
+mkdir -p "$DIR"
+
+rm -f \
+    "$DIR"/TARGET-WIFI-* \
+    "$DIR"/TARGET-AP-* \
+    "$DIR"/TARGET-HIDDEN-* \
+    "$DIR"/TARGET-SSID-* \
+    2>/dev/null
+
+if [ ! -s "$MANIFEST" ]; then
+    echo "No WiFi grouping data available."
+    exit 0
+fi
+
+
+python3 - "$MANIFEST" "$DIR" <<'PY'
+import json
+import os
+import re
+import sys
+from collections import defaultdict
+
+manifest = sys.argv[1]
+directory = sys.argv[2]
+
+
+def safe(value, length=20):
+    value = value.replace(" ", "_")
+
+    value = re.sub(
+        r"[^A-Za-z0-9_.-]",
+        "",
+        value
+    )
+
+    return value[:length] or "unknown"
+
+
+with open(
+    manifest,
+    encoding="utf-8"
+) as f:
+    data = json.load(f)
+
+
+rows = data.get("rows", [])
+groups = data.get("groups", [])
+
+
+# ============================================================
+# Build exact BSSID -> physical AP mapping.
+# ============================================================
+
+bssid_to_group = {}
+
+for index, group in enumerate(groups, start=1):
+
+    for row in group["members"]:
+        bssid_to_group[
+            row["bssid"]
+        ] = index
+
+
+# ============================================================
+# TARGET-AP
+#
+# Primary generated target.
+# One target for every displayed estimated physical AP.
+# ============================================================
+
+ap_count = 0
+
+for index, group in enumerate(groups, start=1):
+
+    bssids = sorted({
+        row["bssid"]
+        for row in group["members"]
+    })
+
+    ssids = sorted({
+        row["ssid"]
+        for row in group["members"]
+        if row["ssid"] != "<hidden>"
+    })
+
+    ap_name = group.get("ap_name")
+
+    if ap_name:
+        label = safe(ap_name, 24)
+
+    elif len(ssids) == 1:
+        label = safe(ssids[0], 15)
+
+    elif len(ssids) > 1:
+        label = "multi"
+
+    else:
+        label = "hidden"
+
+    identity = safe(
+        group["id"].replace(":", ""),
+        14
+    )
+
+    filename = os.path.join(
+        directory,
+        f"TARGET-AP-{index:02d}-{label}-{identity}.sh"
+    )
+
+    args = " ".join(
+        f'"{bssid}"'
+        for bssid in bssids
+    )
+
+    freqs = sorted({
+        str(int(row["freq"]))
+        for row in group["members"]
+        if row.get("freq")
+    })
+
+    freq_args = " ".join(freqs)
+
+    with open(filename, "w") as f:
+        f.write("#!/bin/bash\n")
+
+        if freq_args:
+            f.write(
+                f'exec /usr/local/bin/ap-find-compact 60 '
+                f'--freqs "{freq_args}" {args}\n'
+            )
+        else:
+            f.write(
+                f'exec /usr/local/bin/ap-find-compact 60 {args}\n'
+            )
+
+    os.chmod(filename, 0o755)
+
+    ap_count += 1
+
+
+# ============================================================
+# TARGET-HIDDEN
+#
+# Always exact BSSID.
+# ============================================================
+
+hidden_count = 0
+
+for row in rows:
+
+    if row["ssid"] != "<hidden>":
+        continue
+
+    compact = row["bssid"].replace(":", "")
+
+    filename = os.path.join(
+        directory,
+        f"TARGET-HIDDEN-{compact}.sh"
+    )
+
+    with open(filename, "w") as f:
+        f.write("#!/bin/bash\n")
+        freq = str(int(row["freq"]))
+
+        f.write(
+            f'exec /usr/local/bin/ap-find-compact 60 '
+            f'--freqs "{freq}" "{row["bssid"]}"\n'
+        )
+
+    os.chmod(filename, 0o755)
+
+    hidden_count += 1
+
+
+# ============================================================
+# TARGET-SSID
+#
+# Only generated if every observed instance of that SSID
+# belongs to ONE physical AP group.
+# ============================================================
+
+ssid_groups = defaultdict(set)
+ssid_bssids = defaultdict(set)
+
+for row in rows:
+
+    ssid = row["ssid"]
+
+    if ssid == "<hidden>":
+        continue
+
+    group = bssid_to_group.get(
+        row["bssid"]
+    )
+
+    if group is None:
+        continue
+
+    ssid_groups[ssid].add(group)
+    ssid_bssids[ssid].add(
+        row["bssid"]
+    )
+
+
+ssid_count = 0
+
+for ssid, group_numbers in ssid_groups.items():
+
+    # SSID appears from more than one physical AP.
+    # Therefore it is NOT a meaningful physical target.
+    if len(group_numbers) != 1:
+        continue
+
+    bssids = sorted(
+        ssid_bssids[ssid]
+    )
+
+    args = " ".join(
+        f'"{bssid}"'
+        for bssid in bssids
+    )
+
+    freqs = sorted({
+        str(int(row["freq"]))
+        for row in rows
+        if row["bssid"] in bssids
+    })
+
+    freq_args = " ".join(freqs)
+
+    filename = os.path.join(
+        directory,
+        f"TARGET-SSID-{safe(ssid,22)}.sh"
+    )
+
+    with open(filename, "w") as f:
+        f.write("#!/bin/bash\n")
+
+        if freq_args:
+            f.write(
+                f'exec /usr/local/bin/ap-find-compact 60 '
+                f'--freqs "{freq_args}" {args}\n'
+            )
+        else:
+            f.write(
+                f'exec /usr/local/bin/ap-find-compact 60 {args}\n'
+            )
+
+    os.chmod(filename, 0o755)
+
+    ssid_count += 1
+
+
+print(
+    f"Targets: "
+    f"{ap_count} AP, "
+    f"{hidden_count} hidden, "
+    f"{ssid_count} unique SSID"
+)
+PY
+
+/usr/local/bin/lcd-wrap-targets

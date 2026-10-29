@@ -1,0 +1,159 @@
+#!/bin/bash
+
+LSUSB="/usr/bin/lsusb"
+IP="/usr/sbin/ip"
+ETHTOOL="/usr/sbin/ethtool"
+UDEVADM="/usr/bin/udevadm"
+
+echo "======================================"
+echo "         USB SCAN"
+echo "======================================"
+echo
+
+# --------------------------------------------------
+# SERIAL / CONSOLE
+# --------------------------------------------------
+
+echo "SERIAL / CONSOLE"
+
+SERIAL_FOUND=0
+
+for DEV in /dev/ttyUSB* /dev/ttyACM*; do
+    [ -e "$DEV" ] || continue
+
+    SERIAL_FOUND=1
+
+    DRIVER=$($UDEVADM info -q property -n "$DEV" 2>/dev/null |
+        awk -F= '/^ID_USB_DRIVER=/ {print $2; exit}')
+
+    MODEL=$($UDEVADM info -q property -n "$DEV" 2>/dev/null |
+        awk -F= '/^ID_MODEL_FROM_DATABASE=/ {print $2; exit}')
+
+    if [ -z "$MODEL" ]; then
+        MODEL=$($UDEVADM info -q property -n "$DEV" 2>/dev/null |
+            awk -F= '/^ID_MODEL=/ {print $2; exit}')
+    fi
+
+    VENDOR=$($UDEVADM info -q property -n "$DEV" 2>/dev/null |
+        awk -F= '/^ID_VENDOR_FROM_DATABASE=/ {print $2; exit}')
+
+    if [ -z "$VENDOR" ]; then
+        VENDOR=$($UDEVADM info -q property -n "$DEV" 2>/dev/null |
+            awk -F= '/^ID_VENDOR=/ {print $2; exit}')
+    fi
+
+    echo
+    echo "  Device   : $DEV"
+    echo "  Type     : USB serial / console"
+    echo "  Vendor   : ${VENDOR:---}"
+    echo "  Model    : ${MODEL:---}"
+    echo "  Driver   : ${DRIVER:---}"
+    echo "  Purpose  : Serial / console device access"
+    echo
+    echo "  Connect examples:"
+    echo "    9600   : picocom -b 9600 $DEV"
+    echo "    115200 : picocom -b 115200 $DEV"
+    echo
+    echo "  Generic:"
+    echo "    picocom -b <BAUD> $DEV"
+    echo
+    echo "  Exit:"
+    echo "    Ctrl+A then Ctrl+X"
+done
+
+if [ "$SERIAL_FOUND" -eq 0 ]; then
+    echo "  None detected"
+    echo
+    echo "  Future reference:"
+    echo "    Typical device : /dev/ttyUSB0"
+    echo "    9600 baud      : picocom -b 9600 /dev/ttyUSB0"
+    echo "    115200 baud    : picocom -b 115200 /dev/ttyUSB0"
+    echo "    Generic        : picocom -b <BAUD> <DEVICE>"
+    echo "    Exit           : Ctrl+A then Ctrl+X"
+fi
+
+echo
+
+# --------------------------------------------------
+# ETHERNET
+# --------------------------------------------------
+
+echo "ETHERNET"
+
+ETH_FOUND=0
+
+for PATH_IFACE in /sys/class/net/*; do
+    [ -e "$PATH_IFACE" ] || continue
+
+    DEV=$(basename "$PATH_IFACE")
+
+    case "$DEV" in
+        lo|wlan*|wl*)
+            continue
+            ;;
+    esac
+
+    TYPE=$(cat "$PATH_IFACE/type" 2>/dev/null)
+
+    # ARPHRD_ETHER = 1
+    [ "$TYPE" = "1" ] || continue
+
+    ETH_FOUND=1
+
+    STATE=$(cat "$PATH_IFACE/operstate" 2>/dev/null)
+    MAC=$(cat "$PATH_IFACE/address" 2>/dev/null)
+    IPADDR=$($IP -4 -br addr show "$DEV" 2>/dev/null | awk '{print $3}')
+
+    SPEED=""
+    DUPLEX=""
+
+    if [ -x "$ETHTOOL" ]; then
+        SPEED=$($ETHTOOL "$DEV" 2>/dev/null |
+            awk -F': ' '/Speed:/ {print $2; exit}')
+
+        DUPLEX=$($ETHTOOL "$DEV" 2>/dev/null |
+            awk -F': ' '/Duplex:/ {print $2; exit}')
+    fi
+
+    echo
+    echo "  Interface : $DEV"
+    echo "  State     : ${STATE:-unknown}"
+    echo "  MAC       : ${MAC:---}"
+    echo "  IP        : ${IPADDR:---}"
+    echo "  Speed     : ${SPEED:---}"
+    echo "  Duplex    : ${DUPLEX:---}"
+    echo "  Purpose   : Wired network / switch-port diagnostics"
+    echo
+    echo "  Useful commands:"
+    echo "    ip addr show $DEV"
+    echo "    ip link show $DEV"
+    echo "    sudo ethtool $DEV"
+    echo "    sudo tcpdump -i $DEV"
+done
+
+if [ "$ETH_FOUND" -eq 0 ]; then
+    echo "  None detected"
+    echo
+    echo "  Future reference:"
+    echo "    Inspect IP     : ip addr show <interface>"
+    echo "    Inspect link   : ip link show <interface>"
+    echo "    Link details   : sudo ethtool <interface>"
+    echo "    Packet capture : sudo tcpdump -i <interface>"
+fi
+
+echo
+
+# --------------------------------------------------
+# USB INVENTORY
+# --------------------------------------------------
+
+echo "USB DEVICES"
+
+if [ -x "$LSUSB" ]; then
+    $LSUSB | sed 's/^/  /'
+else
+    echo "  lsusb unavailable"
+fi
+
+echo
+echo "======================================"

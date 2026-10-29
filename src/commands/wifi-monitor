@@ -1,0 +1,241 @@
+#!/bin/bash
+
+IW="/usr/sbin/iw"
+IP="/usr/sbin/ip"
+NMCLI="/usr/bin/nmcli"
+TSHARK="/usr/bin/tshark"
+
+MODE="${1:-help}"
+RADIO="${2:-wlan1}"
+CHANNEL="${3:-}"
+
+usage() {
+    echo "======================================"
+    echo "            WIFI MONITOR"
+    echo "======================================"
+    echo
+    echo "Passive 802.11 monitoring / inspection"
+    echo
+    echo "Usage:"
+    echo "  wifi-monitor live <radio> <channel>"
+    echo "  wifi-monitor detail <radio> <channel>"
+    echo "  wifi-monitor status"
+    echo "  wifi-monitor stop <radio>"
+    echo
+    echo "Examples:"
+    echo "  wifi-monitor live wlan1 11"
+    echo "  wifi-monitor detail wlan1 11"
+    echo "  wifi-monitor stop wlan1"
+}
+
+check_radio() {
+    if [ ! -e "/sys/class/net/$RADIO" ]; then
+        echo "ERROR: $RADIO does not exist."
+        exit 1
+    fi
+}
+
+monitor_capable() {
+    PHYNUM=$($IW dev "$RADIO" info 2>/dev/null |
+        awk '/wiphy/ {print $2; exit}')
+
+    if [ -z "$PHYNUM" ]; then
+        echo "ERROR: Could not identify PHY for $RADIO."
+        exit 1
+    fi
+
+    if ! $IW phy "phy$PHYNUM" info 2>/dev/null |
+        grep -qE '^[[:space:]]+\* monitor$'; then
+        echo "ERROR: $RADIO does not report monitor-mode support."
+        exit 1
+    fi
+}
+
+set_monitor() {
+    check_radio
+    monitor_capable
+
+    if [ -z "$CHANNEL" ]; then
+        echo "ERROR: Channel required."
+        exit 1
+    fi
+
+    echo "Preparing $RADIO..."
+
+    $NMCLI dev disconnect "$RADIO" >/dev/null 2>&1 || true
+    $NMCLI dev set "$RADIO" managed no >/dev/null 2>&1 || true
+
+    sudo $IP link set "$RADIO" down || exit 1
+    sudo $IW dev "$RADIO" set type monitor || exit 1
+    sudo $IP link set "$RADIO" up || exit 1
+    sudo $IW dev "$RADIO" set channel "$CHANNEL" || exit 1
+
+    MODE_NOW=$($IW dev "$RADIO" info 2>/dev/null |
+        awk '/type/ {print $2; exit}')
+
+    CHAN_NOW=$($IW dev "$RADIO" info 2>/dev/null |
+        awk '/channel/ {print $2; exit}')
+
+    if [ "$MODE_NOW" != "monitor" ]; then
+        echo "ERROR: $RADIO did not enter monitor mode."
+        exit 1
+    fi
+
+    if [ "$CHAN_NOW" != "$CHANNEL" ]; then
+        echo "ERROR: $RADIO did not switch to channel $CHANNEL."
+        echo "Current channel: ${CHAN_NOW:---}"
+        exit 1
+    fi
+
+    echo "Radio   : $RADIO"
+    echo "Mode    : $MODE_NOW"
+    echo "Channel : $CHAN_NOW"
+}
+
+restore_radio() {
+    check_radio
+
+    echo "Restoring $RADIO..."
+
+    sudo $IP link set "$RADIO" down || exit 1
+    sudo $IW dev "$RADIO" set type managed || exit 1
+    sudo $IP link set "$RADIO" up || exit 1
+
+    $NMCLI dev set "$RADIO" managed yes >/dev/null 2>&1 || true
+
+    MODE_NOW=$($IW dev "$RADIO" info 2>/dev/null |
+        awk '/type/ {print $2; exit}')
+
+    echo "$RADIO restored to ${MODE_NOW:-managed} mode."
+}
+
+status() {
+    echo "======================================"
+    echo "       WIFI MONITOR STATUS"
+    echo "======================================"
+    echo
+
+    for DEVPATH in /sys/class/net/wlan*; do
+        [ -e "$DEVPATH" ] || continue
+
+        DEV=$(basename "$DEVPATH")
+        INFO=$($IW dev "$DEV" info 2>/dev/null)
+
+        MODE_NOW=$(echo "$INFO" |
+            awk '/type/ {print $2; exit}')
+
+        CHAN=$(echo "$INFO" |
+            awk '/channel/ {print $2; exit}')
+
+        STATE=$(cat "$DEVPATH/operstate" 2>/dev/null)
+
+        echo "$DEV"
+        echo "  State   : ${STATE:-unknown}"
+        echo "  Mode    : ${MODE_NOW:-unknown}"
+        echo "  Channel : ${CHAN:---}"
+        echo
+    done
+}
+
+short_mac() {
+    if [ -z "$1" ]; then
+        echo "--"
+    else
+        echo "$1" | awk -F: '{print toupper($1":"$2":"$3)}'
+    fi
+}
+
+frame_name() {
+    case "$1" in
+        0x0008) echo "BEACON" ;;
+        0x0004) echo "PROBE-REQ" ;;
+        0x0005) echo "PROBE-RSP" ;;
+        0x0000) echo "ASSOC-REQ" ;;
+        0x0001) echo "ASSOC-RSP" ;;
+        0x000b) echo "AUTH" ;;
+        0x000c) echo "DEAUTH" ;;
+        0x0010) echo "DATA" ;;
+        0x0024) echo "NULL-DATA" ;;
+        0x0028) echo "QOS-DATA" ;;
+        0x001b) echo "RTS" ;;
+        0x001c) echo "CTS" ;;
+        0x001d) echo "ACK" ;;
+        *)      echo "$1" ;;
+    esac
+}
+
+live_monitor() {
+    set_monitor
+
+    echo
+    echo "======================================"
+    echo "        LIVE 802.11 TRAFFIC"
+    echo "======================================"
+    echo
+    echo "Ctrl+C to stop."
+    echo
+    echo "TIME      SIG   TYPE        SOURCE     DEST       LEN"
+    echo "--------------------------------------------------------"
+
+    $TSHARK \
+        -l \
+        -n \
+        -i "$RADIO" \
+        -T fields \
+        -E separator='|' \
+        -E occurrence=f \
+        -e frame.time_epoch \
+        -e radiotap.dbm_antsignal \
+        -e wlan.fc.type_subtype \
+        -e wlan.sa \
+        -e wlan.da \
+        -e frame.len \
+        2>/dev/null |
+    while IFS='|' read -r TIME SIG TYPE SRC DST LEN; do
+
+        NOW=$(date -d "@${TIME%%.*}" '+%H:%M:%S' 2>/dev/null)
+        DESC=$(frame_name "$TYPE")
+        SSRC=$(short_mac "$SRC")
+        SDST=$(short_mac "$DST")
+
+        printf "%-9s %-5s %-11s %-10s %-10s %-5s\n" \
+            "${NOW:---}" \
+            "${SIG:---}" \
+            "${DESC:---}" \
+            "$SSRC" \
+            "$SDST" \
+            "${LEN:---}"
+    done
+}
+
+detail_monitor() {
+    set_monitor
+
+    echo
+    echo "Waiting for next 802.11 frame..."
+    echo
+
+    $TSHARK \
+        -i "$RADIO" \
+        -c 1 \
+        -V
+}
+
+
+case "$MODE" in
+    live)
+        live_monitor
+        ;;
+    detail)
+        detail_monitor
+        ;;
+    status)
+        status
+        ;;
+    stop)
+        restore_radio
+        ;;
+    *)
+        usage
+        ;;
+esac

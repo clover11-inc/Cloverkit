@@ -1,0 +1,2 @@
+@OPERATOR@ ALL=(root) NOPASSWD: /usr/bin/python3 -I /usr/local/lib/cloverkit/vehicle/conveh_access.py enable, /usr/bin/python3 -I /usr/local/lib/cloverkit/vehicle/conveh_access.py disable, /usr/bin/python3 -I /usr/local/lib/cloverkit/vehicle/conveh_access.py status
+conveh ALL=(root) NOPASSWD: /usr/bin/python3 -I /usr/local/lib/cloverkit/vehicle/conveh_access.py session

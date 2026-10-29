@@ -1,0 +1,16 @@
+[Unit]
+Description=BlackHat Persistent Serial Gateway
+After=local-fs.target bh-boot.service cloverkit-radio-names.service
+Requires=bh-boot.service
+Wants=cloverkit-radio-names.service
+Conflicts=serial-getty@ttyS0.service
+
+[Service]
+Type=simple
+ExecStart=/usr/local/bin/bh-serial-gateway
+Restart=always
+RestartSec=2
+User=root
+
+[Install]
+WantedBy=multi-user.target

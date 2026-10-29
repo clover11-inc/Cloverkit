@@ -1,0 +1,49 @@
+#!/bin/bash
+
+set -u
+
+FILE="/mnt/security/authorized-ble.txt"
+
+MAC="${1:-}"
+
+if [ -z "$MAC" ]; then
+    echo
+    echo "Usage:"
+    echo "  sec-ble-authorize AA:BB:CC:DD:EE:FF [friendly name]"
+    echo
+    exit 1
+fi
+
+shift || true
+
+NAME="$*"
+
+MAC="$(echo "$MAC" | tr '[:lower:]' '[:upper:]')"
+
+if ! echo "$MAC" | grep -Eq '^([0-9A-F]{2}:){5}[0-9A-F]{2}$'; then
+    echo "ERROR: invalid BLE MAC address"
+    exit 1
+fi
+
+sudo touch "$FILE"
+
+sudo sed -i \
+    "\|^${MAC}|d" \
+    "$FILE"
+
+echo "${MAC}|${NAME}" \
+    | sudo tee -a "$FILE" >/dev/null
+
+echo
+echo "BLE device authorized for read-only active inspection:"
+echo
+echo "  MAC  : $MAC"
+
+if [ -n "$NAME" ]; then
+    echo "  Name : $NAME"
+fi
+
+echo
+echo "Active inspection occurs only when you run:"
+echo
+echo "  sec-scan --ble-active"

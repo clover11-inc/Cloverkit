@@ -1,0 +1,148 @@
+#!/usr/bin/python3
+"""Parallel discovery on free USB test radios, without changing radio modes."""
+import concurrent.futures,fcntl,json,os,re,signal,subprocess,sys,tempfile,threading
+from pathlib import Path
+sys.path.insert(0,'/usr/local/lib/bh-interactive')
+from cloverkit_radio_identity import assert_layout,verify_usb
+STOP=threading.Event()
+PROCESSES=set()
+MUTEX=threading.Lock()
+def call(args,timeout=35):
+    if STOP.is_set():raise RuntimeError('Scan cancelled')
+    p=subprocess.Popen(args,stdout=subprocess.PIPE,stderr=subprocess.PIPE,text=True)
+    with MUTEX:PROCESSES.add(p)
+    try:
+        out,err=p.communicate(timeout=timeout)
+        if p.returncode:raise RuntimeError(err.strip()[-300:] or 'command failed: '+args[0])
+        return out
+    except subprocess.TimeoutExpired:
+        p.kill();p.communicate();raise RuntimeError('Scan timed out')
+    finally:
+        with MUTEX:PROCESSES.discard(p)
+def cancel(signum,frame):
+    STOP.set()
+    with MUTEX:
+        for p in PROCESSES:
+            try:p.terminate()
+            except ProcessLookupError:pass
+def band(freq):
+    return '2.4 GHz' if 2400<=freq<2500 else '5 GHz' if 4900<=freq<5925 else '6 GHz' if 5925<=freq<=7125 else None
+def enabled_frequencies(info):
+    return sorted({int(float(m.group(1))) for line in info.splitlines() if '(disabled)' not in line and (m:=re.search(r'\*\s+(\d+(?:\.\d+)?)\s+MHz\s+\[',line)) and band(int(float(m.group(1))))})
+def plan(radios):
+    result={r['name']:[] for r in radios}
+    if len(radios)==1:return {radios[0]['name']:radios[0]['freqs'][:]}
+    # Assign each supported band once; prefer a different radio for 5 GHz.
+    for wanted in ('2.4 GHz','5 GHz','6 GHz'):
+        candidates=[r for r in radios if any(band(f)==wanted for f in r['freqs'])]
+        if not candidates:continue
+        chosen=min(candidates,key=lambda r:(len(result[r['name']]),len({band(f) for f in r['freqs']}),r['name']))
+        result[chosen['name']].extend(f for f in chosen['freqs'] if band(f)==wanted)
+    return {name:freqs for name,freqs in result.items() if freqs}
+def parse_scan(text,allowed,adapter):
+    rows=[];row=None
+    for line in text.splitlines()+['BSS END']:
+        m=re.match(r'^BSS ([0-9a-fA-F:]{17})',line)
+        if line.startswith('BSS '):
+            if row and row.get('freq') in allowed and 'sig' in row:
+                row['band']={'2.4 GHz':'2.4G','5 GHz':'5G','6 GHz':'6G'}[band(row['freq'])]
+                f=row['freq'];row['ch']=str(14 if f==2484 else (f-2407)//5 if f<2500 else (f-5950)//5 if f>=5955 else 2 if f==5935 else (f-5000)//5)
+                rows.append(row)
+            row={'bssid':m.group(1).upper(),'ssid':'<hidden>','security':'OPEN','observed_by':[adapter],'privacy':None,'rsn':False,'wpa':False,'wps':False,'ciphers':[],'akms':[]} if m else None
+        elif row is not None:
+            s=line.strip()
+            if s.startswith('freq:'):row['freq']=int(float(s.split()[1]))
+            elif s.startswith('signal:'):row['sig']=float(s.split()[1])
+            elif s.startswith('SSID:'):row['ssid']=s[5:].strip() or '<hidden>'
+            elif s.startswith('capability:'):row['privacy']='Privacy' in s
+            elif s.startswith('RSN:'):row['security']='WPA2/3';row['rsn']=True
+            elif s.startswith('WPA:'):
+                row['wpa']=True
+                if row['security']=='OPEN':row['security']='WPA'
+            elif s.startswith('WPS:'):row['wps']=True
+            elif 'Pairwise ciphers:' in s or s.startswith('Group cipher:'):row['ciphers']=sorted(set(row['ciphers']+s.split(':',1)[1].split()))
+            elif 'Authentication suites:' in s:row['akms']=sorted(set(row['akms']+s.split(':',1)[1].split()))
+            elif s.startswith('Capabilities:') and row.get('rsn'):
+                row['pmf_capable']='MFP-capable' in s or 'MFP-required' in s
+                row['pmf_required']='MFP-required' in s
+    return rows
+def merge(scans):
+    rows={}
+    for scan in scans:
+        for item in scan:
+            key=(item['bssid'].upper(),item['freq']);old=rows.get(key)
+            if old:
+                seen=sorted(set(old['observed_by']+item['observed_by']))
+                if item['sig']>old['sig']:rows[key]=dict(item)
+                rows[key]['observed_by']=seen
+            else:rows[key]=dict(item)
+    return sorted(rows.values(),key=lambda r:r['sig'],reverse=True)
+def discover():
+    assert_layout();radios=[];notes=[]
+    for name in ('wlan1','wlan2'):
+        lock=None
+        try:
+            if not (Path('/sys/class/net')/name).exists():notes.append(name+': not connected');continue
+            phy=verify_usb(name).name
+            lock=open('/run/lock/cloverkit-passive-'+phy+'.lock','a')
+            fcntl.flock(lock,fcntl.LOCK_EX|fcntl.LOCK_NB)
+            # Reject shared/virtual interfaces and active connections.
+            peers=[p for p in Path('/sys/class/net').iterdir() if (p/'phy80211').exists() and (p/'phy80211').resolve().name==phy]
+            if len(peers)!=1:raise RuntimeError('shared radio is busy')
+            info=call(['/sbin/iw','dev',name,'info'])
+            if not re.search(r'^\s*type managed\s*$',info,re.M):raise RuntimeError('busy: not managed mode')
+            if 'Connected to ' in call(['/sbin/iw','dev',name,'link']):raise RuntimeError('busy: connected')
+            links=json.loads(call(['/sbin/ip','-j','link','show','dev',name]))
+            if not links or 'UP' not in links[0]['flags']:raise RuntimeError('interface down; reset adapters first')
+            freqs=enabled_frequencies(call(['/sbin/iw','phy',phy,'info']))
+            if not freqs:raise RuntimeError('no enabled Wi-Fi channels')
+            radios.append(dict(name=name,phy=phy,freqs=freqs,lock=lock));lock=None
+        except BlockingIOError:notes.append(name+': busy: capture owns radio')
+        except (RuntimeError,OSError) as error:notes.append(name+': '+str(error))
+        finally:
+            if lock:lock.close()
+    return radios,notes
+def scan_one(radio,freqs):
+    verify_usb(radio['name'])
+    output=call(['/sbin/iw','dev',radio['name'],'scan','freq',*[str(f) for f in freqs],'flush'])
+    return parse_scan(output,set(freqs),radio['name'])
+def main():
+    if len(sys.argv)!=1:raise RuntimeError('No arguments accepted')
+    if os.geteuid()!=0:raise RuntimeError('Device watch Wi-Fi discovery requires root')
+    signal.signal(signal.SIGTERM,cancel);signal.signal(signal.SIGINT,cancel)
+    radios,notes=discover()
+    try:
+        plans=plan(radios);results=[];coverage=[]
+        with concurrent.futures.ThreadPoolExecutor(max_workers=2) as pool:
+            jobs={pool.submit(scan_one,r,plans[r['name']]):r for r in radios if r['name'] in plans}
+            for future in concurrent.futures.as_completed(jobs):
+                r=jobs[future];bands=sorted({band(f) for f in plans[r['name']]})
+                try:
+                    rows=future.result();results.append(rows)
+                    coverage.append(dict(adapter=r['name'],bands=bands,status='ok',bssids=len(rows)))
+                except (RuntimeError,OSError,ValueError) as error:
+                    notes.append(r['name']+': '+str(error));coverage.append(dict(adapter=r['name'],bands=bands,status='failed'))
+        if STOP.is_set():raise RuntimeError('Scan cancelled')
+        good=[c for c in coverage if c['status']=='ok']
+        if not good:raise RuntimeError('; '.join(notes) or 'No free managed USB Wi-Fi radio')
+        for wanted in ('2.4 GHz','5 GHz'):
+            if not any(wanted in c['bands'] for c in good):notes.append(wanted+': not scanned')
+        rows=merge(results);directory=Path('/run/cloverkit');directory.mkdir(parents=True,exist_ok=True)
+        with tempfile.TemporaryDirectory(prefix='device-watch-wifi-',dir=directory) as temp:
+            temp=Path(temp);raw=temp/'rows';grouped=temp/'groups.json';apnames=temp/'names';apnames.write_text('')
+            raw.write_text(''.join('|'.join(str(v).replace('|',' ') for v in (r['sig'],r['ch'],r['freq'],'' if r['ssid']=='<hidden>' else r['ssid'],r['bssid'],r['security']))+'\n' for r in rows))
+            call(['/usr/bin/python3','/usr/local/lib/bh-interactive/cloverkit_wifi_group.py',str(raw),good[0]['adapter'],str(grouped),str(apnames)])
+            data=json.loads(grouped.read_text());data['rows']=rows
+            # Retain AP-name fields produced by the existing grouping implementation.
+            names={r['bssid']:r.get('ap_name') for g in data['groups'] for r in g['members']}
+            for row in rows:row['ap_name']=names.get(row['bssid'])
+            data.update(interfaces=[c['adapter'] for c in good],coverage=coverage,coverage_notes=notes)
+            grouped.write_text(json.dumps(data));grouped.chmod(0o600);os.replace(grouped,directory/'wifi-groups.json')
+        try:call(['/usr/local/bin/target-build-wifi'],timeout=20)
+        except (RuntimeError,OSError):pass
+        print(json.dumps(coverage),flush=True)
+    finally:
+        for r in radios:r['lock'].close()
+if __name__=='__main__':
+    try:main()
+    except Exception as error:print(str(error),file=sys.stderr,flush=True);sys.exit(2)

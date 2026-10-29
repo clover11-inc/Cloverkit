@@ -1,0 +1,7 @@
+#!/usr/bin/python3
+import os,sys
+sys.path.insert(0,'/usr/local/lib/bh-interactive')
+from cloverkit_recovery_hotspot import once
+if os.geteuid()!=0 or len(sys.argv)!=1:raise SystemExit('Use the installed recovery service')
+try:once()
+except Exception:raise SystemExit('CloverKit recovery check failed; no credentials logged')

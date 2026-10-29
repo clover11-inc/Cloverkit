@@ -1,0 +1,20 @@
+#!/bin/bash
+
+set -u
+
+FILE="/mnt/security/authorized-ble.txt"
+
+MAC="${1:-}"
+
+if [ -z "$MAC" ]; then
+    echo "Usage: sec-ble-remove AA:BB:CC:DD:EE:FF"
+    exit 1
+fi
+
+MAC="$(echo "$MAC" | tr '[:lower:]' '[:upper:]')"
+
+sudo sed -i \
+    "\|^${MAC}|d" \
+    "$FILE"
+
+echo "Removed BLE authorization: $MAC"

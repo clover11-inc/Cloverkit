@@ -1,0 +1,545 @@
+#!/usr/bin/env python3
+import sys as _identity_sys
+_identity_sys.path.insert(0,'/usr/local/lib/bh-interactive')
+from cloverkit_radio_identity import assert_layout as _assert_radio_layout
+_assert_radio_layout()
+
+import json
+import os
+import queue
+import signal
+import subprocess
+import sys
+import threading
+import time
+from collections import Counter
+
+
+IW = "/usr/sbin/iw"
+IP = "/usr/sbin/ip"
+TSHARK = "/usr/bin/tshark"
+
+CHANNELS = [
+    1, 6, 11,
+    36, 40, 44, 48,
+    52, 56, 60, 64,
+    100, 104, 108, 112, 116,
+    132, 136, 140,
+    149, 153, 157, 161,
+]
+
+TYPE_NAMES = {
+    0: "Management",
+    1: "Control",
+    2: "Data",
+}
+
+SUBTYPES = {
+    0x0000: "Association Request",
+    0x0001: "Association Response",
+    0x0002: "Reassociation Request",
+    0x0003: "Reassociation Response",
+    0x0004: "Probe Request",
+    0x0005: "Probe Response",
+    0x0008: "Beacon",
+    0x000A: "Disassociation",
+    0x000B: "Authentication",
+    0x000C: "Deauthentication",
+    0x000D: "Action",
+
+    0x0018: "Block Ack Request",
+    0x0019: "Block Ack",
+    0x001B: "RTS",
+    0x001C: "CTS",
+    0x001D: "ACK",
+
+    0x0020: "Data",
+    0x0024: "Null Function",
+    0x0028: "QoS Data",
+    0x002C: "QoS Null",
+}
+
+
+def run(*args):
+    return subprocess.run(
+        args,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+    )
+
+
+def output(obj):
+    print(
+        "LIVE_PACKET_JSON "
+        + json.dumps(
+            obj,
+            separators=(",", ":"),
+        ),
+        flush=True,
+    )
+
+
+def choose_interface():
+    for path in sorted(
+        os.listdir("/sys/class/net")
+    ):
+        if not path.startswith("wlan"):
+            continue
+
+        if path == "wlan0":
+            continue
+
+        if os.path.isdir(
+            f"/sys/class/net/{path}/wireless"
+        ):
+            return path
+
+    return None
+
+
+def parse_int(value):
+    value = str(value or "").strip()
+
+    if not value:
+        return None
+
+    value = value.split(",")[0]
+
+    try:
+        return int(value, 0)
+    except Exception:
+        try:
+            return int(value)
+        except Exception:
+            return None
+
+
+def main():
+
+    seconds = 60
+
+    if len(sys.argv) > 1:
+        try:
+            seconds = int(sys.argv[1])
+        except Exception:
+            pass
+
+    seconds = max(
+        10,
+        min(seconds, 300),
+    )
+
+    if os.geteuid() != 0:
+        os.execvp(
+            "sudo",
+            [
+                "sudo",
+                "-n",
+                "/usr/local/bin/packet-general-live",
+                str(seconds),
+            ],
+        )
+
+    interface = choose_interface()
+
+    if not interface:
+        print("ERROR:NO EXT WIFI")
+        return 1
+
+    if interface == "wlan0":
+        print("ERROR:WLAN0 BLOCKED")
+        return 1
+
+    classes = Counter()
+    types = Counter()
+    channels = Counter()
+
+    total = 0
+    current_channel = None
+
+    q = queue.Queue()
+    tshark = None
+
+    stop_reader = threading.Event()
+
+    def restore():
+        nonlocal tshark
+
+        if tshark is not None:
+            try:
+                tshark.terminate()
+            except Exception:
+                pass
+
+            try:
+                tshark.wait(timeout=2)
+            except Exception:
+                try:
+                    tshark.kill()
+                except Exception:
+                    pass
+
+        run(IP, "link", "set", interface, "down")
+        run(IW, "dev", interface, "set", "type", "managed")
+        run(IP, "link", "set", interface, "up")
+
+        if shutil_which("nmcli"):
+            run(
+                "nmcli",
+                "device",
+                "set",
+                interface,
+                "managed",
+                "yes",
+            )
+
+    def handle_signal(signum, frame):
+        restore()
+        raise SystemExit(128 + signum)
+
+    signal.signal(
+        signal.SIGTERM,
+        handle_signal,
+    )
+
+    signal.signal(
+        signal.SIGINT,
+        handle_signal,
+    )
+
+    try:
+
+        # ----------------------------------------------------
+        # Prepare external radio only.
+        # wlan0 is never touched.
+        # ----------------------------------------------------
+
+        if shutil_which("nmcli"):
+            run(
+                "nmcli",
+                "device",
+                "set",
+                interface,
+                "managed",
+                "no",
+            )
+
+        run(
+            IP,
+            "link",
+            "set",
+            interface,
+            "down",
+        )
+
+        if run(
+            IW,
+            "dev",
+            interface,
+            "set",
+            "type",
+            "monitor",
+        ).returncode != 0:
+
+            print("ERROR:MONITOR MODE")
+            return 1
+
+        run(
+            IP,
+            "link",
+            "set",
+            interface,
+            "up",
+        )
+
+        # ----------------------------------------------------
+        # Live TShark stream.
+        # ----------------------------------------------------
+
+        cmd = [
+            TSHARK,
+            "-l",
+            "-n",
+            "-i",
+            interface,
+
+            "-T",
+            "fields",
+
+            "-E",
+            "separator=\t",
+
+            "-E",
+            "occurrence=f",
+
+            "-e",
+            "frame.number",
+
+            "-e",
+            "wlan.fc.type",
+
+            "-e",
+            "wlan.fc.type_subtype",
+
+            "-e",
+            "wlan_radio.channel",
+        ]
+
+        tshark = subprocess.Popen(
+            cmd,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.DEVNULL,
+            text=True,
+            bufsize=1,
+        )
+
+        def reader():
+            assert tshark.stdout is not None
+
+            for line in tshark.stdout:
+                if stop_reader.is_set():
+                    break
+
+                q.put(
+                    line.rstrip("\r\n")
+                )
+
+        thread = threading.Thread(
+            target=reader,
+            daemon=True,
+        )
+
+        thread.start()
+
+        start = time.monotonic()
+
+        next_hop = start
+        next_emit = start
+
+        hop_index = 0
+
+        previous_total = 0
+        previous_time = start
+
+        output({
+            "profile": "general",
+            "state": "LIVE",
+            "interface": interface,
+            "duration": seconds,
+            "elapsed": 0,
+            "remaining": seconds,
+            "frames": 0,
+            "rate": 0,
+            "classes": {},
+            "types": {},
+            "channels": {},
+        })
+
+        while True:
+
+            now = time.monotonic()
+
+            elapsed = now - start
+
+            if elapsed >= seconds:
+                break
+
+            # -----------------------------------------------
+            # Channel hop every 2 seconds.
+            # -----------------------------------------------
+
+            if now >= next_hop:
+
+                attempts = 0
+
+                while attempts < len(CHANNELS):
+
+                    channel = CHANNELS[
+                        hop_index
+                        % len(CHANNELS)
+                    ]
+
+                    hop_index += 1
+                    attempts += 1
+
+                    result = run(
+                        IW,
+                        "dev",
+                        interface,
+                        "set",
+                        "channel",
+                        str(channel),
+                    )
+
+                    if result.returncode == 0:
+                        current_channel = channel
+                        break
+
+                next_hop = now + 2.0
+
+            # -----------------------------------------------
+            # Drain received frames.
+            # -----------------------------------------------
+
+            while True:
+                try:
+                    line = q.get_nowait()
+                except queue.Empty:
+                    break
+
+                fields = line.split("\t")
+
+                while len(fields) < 4:
+                    fields.append("")
+
+                frame_no = fields[0]
+                frame_type = parse_int(
+                    fields[1]
+                )
+                subtype = parse_int(
+                    fields[2]
+                )
+                observed_channel = parse_int(
+                    fields[3]
+                )
+
+                if not frame_no:
+                    continue
+
+                total += 1
+
+                if frame_type in TYPE_NAMES:
+                    classes[
+                        TYPE_NAMES[frame_type]
+                    ] += 1
+
+                if subtype is not None:
+                    name = SUBTYPES.get(
+                        subtype,
+                        f"Subtype 0x{subtype:04X}",
+                    )
+
+                    types[name] += 1
+
+                ch = (
+                    observed_channel
+                    if observed_channel is not None
+                    else current_channel
+                )
+
+                if ch is not None:
+                    channels[str(ch)] += 1
+
+            # -----------------------------------------------
+            # Emit one cumulative update per second.
+            # -----------------------------------------------
+
+            if now >= next_emit:
+
+                delta_t = max(
+                    0.001,
+                    now - previous_time,
+                )
+
+                rate = round(
+                    (total - previous_total)
+                    / delta_t
+                )
+
+                previous_total = total
+                previous_time = now
+
+                output({
+                    "profile": "general",
+                    "state": "LIVE",
+                    "interface": interface,
+                    "duration": seconds,
+                    "elapsed": int(elapsed),
+                    "remaining": max(
+                        0,
+                        seconds - int(elapsed),
+                    ),
+                    "frames": total,
+                    "rate": rate,
+                    "classes": dict(classes),
+                    "types": dict(types),
+                    "channels": dict(channels),
+                })
+
+                next_emit = now + 1.0
+
+            time.sleep(0.05)
+
+        # Drain anything queued at the cutoff.
+        time.sleep(0.15)
+
+        while True:
+            try:
+                line = q.get_nowait()
+            except queue.Empty:
+                break
+
+            fields = line.split("\t")
+
+            while len(fields) < 4:
+                fields.append("")
+
+            if not fields[0]:
+                continue
+
+            frame_type = parse_int(fields[1])
+            subtype = parse_int(fields[2])
+            observed_channel = parse_int(fields[3])
+
+            total += 1
+
+            if frame_type in TYPE_NAMES:
+                classes[
+                    TYPE_NAMES[frame_type]
+                ] += 1
+
+            if subtype is not None:
+                types[
+                    SUBTYPES.get(
+                        subtype,
+                        f"Subtype 0x{subtype:04X}",
+                    )
+                ] += 1
+
+            ch = (
+                observed_channel
+                if observed_channel is not None
+                else current_channel
+            )
+
+            if ch is not None:
+                channels[str(ch)] += 1
+
+        output({
+            "profile": "general",
+            "state": "COMPLETE",
+            "interface": interface,
+            "duration": seconds,
+            "elapsed": seconds,
+            "remaining": 0,
+            "frames": total,
+            "rate": 0,
+            "classes": dict(classes),
+            "types": dict(types),
+            "channels": dict(channels),
+        })
+
+        return 0
+
+    finally:
+        stop_reader.set()
+        restore()
+
+
+def shutil_which(command):
+    import shutil
+    return shutil.which(command)
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

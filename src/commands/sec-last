@@ -1,0 +1,9 @@
+#!/bin/bash
+FILE="/mnt/security/reports/latest.json"
+
+if [ ! -f "$FILE" ]; then
+    echo "No security scan has been run yet."
+    exit 1
+fi
+
+python3 -m json.tool "$FILE"

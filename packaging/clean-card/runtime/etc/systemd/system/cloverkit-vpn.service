@@ -1,0 +1,12 @@
+[Unit]
+Description=CloverKit optional VPN
+After=network-online.target
+Wants=network-online.target
+ConditionPathExists=/etc/cloverkit/vpn/client.ovpn
+
+[Service]
+Type=simple
+ExecStart=/usr/sbin/openvpn --config /etc/cloverkit/vpn/client.ovpn --auth-nocache
+Restart=no
+
+# Deliberately no automatic enablement target.

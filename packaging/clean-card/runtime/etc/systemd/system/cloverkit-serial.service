@@ -1,0 +1,21 @@
+[Unit]
+Description=CloverKit shared USB serial console
+After=local-fs.target
+
+[Service]
+Type=simple
+Environment=CLOVERKIT_USER=admin
+ExecStart=/usr/bin/python3 /usr/local/lib/bh-interactive/shared_console.py broker
+Restart=on-failure
+RestartSec=2
+RuntimeDirectory=cloverkit-serial
+RuntimeDirectoryMode=0755
+UMask=0077
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+ReadWritePaths=/run/cloverkit-serial
+
+[Install]
+WantedBy=multi-user.target

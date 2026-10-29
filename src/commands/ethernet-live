@@ -1,0 +1,1203 @@
+#!/usr/bin/env python3
+
+import json
+import re
+import signal
+import subprocess
+import sys
+import threading
+import time
+from pathlib import Path
+
+
+IFACE = sys.argv[1] if len(sys.argv) > 1 else "eth0"
+
+if IFACE != "eth0":
+    print("ERROR: ethernet-live currently protects operation to eth0 only")
+    sys.exit(2)
+
+ETHTOOL = "/usr/sbin/ethtool"
+IP = "/usr/sbin/ip"
+LSUSB = "/usr/bin/lsusb"
+TSHARK = "/usr/bin/tshark"
+
+running = True
+
+l2_lock = threading.Lock()
+l2_process = None
+l2_thread = None
+
+connection_id = 0
+
+
+# ============================================================
+# SIGNALS
+# ============================================================
+
+def stop(_sig=None, _frame=None):
+    global running
+
+    running = False
+    stop_l2_capture()
+
+
+signal.signal(signal.SIGTERM, stop)
+signal.signal(signal.SIGINT, stop)
+
+
+# ============================================================
+# BASIC HELPERS
+# ============================================================
+
+sys.path.insert(0,'/usr/local/lib/bh-interactive')
+from cloverkit_insights import ethernet_findings, atomic_json
+
+def emit(**fields):
+    fields['diagnosis']=ethernet_findings(fields)
+    fields['updated_at']=time.time()
+    try:atomic_json('/var/lib/cloverkit/ethernet-evidence/latest.json',fields)
+    except OSError:pass
+    print(
+        "ETHERNET_JSON "
+        + json.dumps(
+            fields,
+            separators=(",", ":"),
+        ),
+        flush=True,
+    )
+
+
+def read_text(path, default=""):
+    try:
+        return Path(path).read_text().strip()
+    except Exception:
+        return default
+
+
+def read_int(path):
+    try:
+        return int(read_text(path, "0"))
+    except Exception:
+        return 0
+
+
+def run(args, timeout=2):
+    try:
+        p = subprocess.run(
+            args,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.DEVNULL,
+            text=True,
+            timeout=timeout,
+        )
+
+        if p.returncode == 0:
+            return p.stdout
+
+    except Exception:
+        pass
+
+    return ""
+
+
+def interface_exists():
+    return Path(
+        f"/sys/class/net/{IFACE}"
+    ).exists()
+
+
+def carrier():
+    if not interface_exists():
+        return False
+
+    return (
+        read_text(
+            f"/sys/class/net/{IFACE}/carrier",
+            "0",
+        )
+        == "1"
+    )
+
+
+def link_details():
+    speed = read_text(
+        f"/sys/class/net/{IFACE}/speed",
+        "",
+    )
+
+    duplex = read_text(
+        f"/sys/class/net/{IFACE}/duplex",
+        "",
+    ).upper()
+
+    try:
+        n = int(speed)
+
+        if n >= 1000:
+            if n % 1000 == 0:
+                speed = f"{n // 1000}G"
+            else:
+                speed = f"{n / 1000:g}G"
+
+        elif n > 0:
+            speed = f"{n}M"
+
+        else:
+            speed = "--"
+
+    except Exception:
+        speed = "--"
+
+    if duplex not in ("FULL", "HALF"):
+        duplex = "--"
+
+    return speed, duplex
+
+
+def ip_address():
+    out = run(
+        [
+            IP,
+            "-4",
+            "-o",
+            "addr",
+            "show",
+            "dev",
+            IFACE,
+            "scope",
+            "global",
+        ]
+    )
+
+    for line in out.splitlines():
+        parts = line.split()
+
+        if len(parts) >= 4:
+            return parts[3].split("/", 1)[0]
+
+    return "--"
+
+
+def driver_info():
+    driver = "--"
+    firmware = "--"
+
+    out = run([ETHTOOL, "-i", IFACE])
+
+    for line in out.splitlines():
+
+        if line.startswith("driver:"):
+            driver = line.split(":", 1)[1].strip()
+
+        elif line.startswith("firmware-version:"):
+            firmware = line.split(":", 1)[1].strip()
+
+    return driver, firmware
+
+
+def adapter_info():
+    out = run([LSUSB])
+
+    low = out.lower()
+
+    if "0bda:8153" in low:
+        return "RTL8153"
+
+    if "0bda:8156" in low:
+        return "RTL8156"
+
+    return "ETHERNET"
+
+
+def statistics():
+    base = Path(
+        f"/sys/class/net/{IFACE}/statistics"
+    )
+
+    names = (
+        "rx_bytes",
+        "tx_bytes",
+        "rx_packets",
+        "tx_packets",
+        "rx_errors",
+        "tx_errors",
+        "rx_dropped",
+        "tx_dropped",
+    )
+
+    return {
+        name: read_int(base / name)
+        for name in names
+    }
+
+
+def human_bytes(value):
+    n = float(value)
+
+    units = (
+        "B",
+        "KB",
+        "MB",
+        "GB",
+        "TB",
+    )
+
+    for unit in units:
+
+        if n < 1024.0 or unit == "TB":
+
+            if unit == "B":
+                return f"{int(n)} B"
+
+            if n >= 100:
+                return f"{n:.0f} {unit}"
+
+            if n >= 10:
+                return f"{n:.1f} {unit}"
+
+            return f"{n:.2f} {unit}"
+
+        n /= 1024.0
+
+
+def human_rate(value):
+    n = float(value)
+
+    units = (
+        "B/s",
+        "K/s",
+        "M/s",
+        "G/s",
+    )
+
+    for unit in units:
+
+        if n < 1024.0 or unit == "G/s":
+
+            if unit == "B/s":
+                return f"{int(n)} B/s"
+
+            if n >= 100:
+                return f"{n:.0f}{unit}"
+
+            if n >= 10:
+                return f"{n:.1f}{unit}"
+
+            return f"{n:.2f}{unit}"
+
+        n /= 1024.0
+
+
+# ============================================================
+# TSHARK CAPTURE FIELDS
+#
+# Keep Ethernet launch fast.
+#
+# These fields are verified against the tshark installation on
+# this BlackHat.  Do NOT execute "tshark -G fields" during every
+# Ethernet launch: on this system that registry contains ~270k
+# fields and adds ~17 seconds before the first UI state.
+#
+# cdp.portid is deliberately explicit.  tshark supports it here,
+# but its registry description did not match the previous dynamic
+# resolver, causing PORT discovery to wait for LLDP.
+# ============================================================
+
+FIELD_MAP = {
+    "protocol": None,
+
+    "src": "eth.src",
+    "dst": "eth.dst",
+    "etype": "eth.type",
+    "vlan": "vlan.id",
+
+    # LACP
+    "lacp_system": "lacp.actor.sysid",
+    "lacp_key": "lacp.actor.key",
+    "lacp_port": "lacp.actor.port",
+    "lacp_state": "lacp.actor.state_str",
+    "lacp_active": "lacp.actor.state.activity",
+    "lacp_aggregate": "lacp.actor.state.aggregation",
+    "lacp_sync": "lacp.actor.state.synchronization",
+    "lacp_collect": "lacp.actor.state.collecting",
+    "lacp_distribute": "lacp.actor.state.distributing",
+    "lacp_defaulted": "lacp.actor.state.defaulted",
+
+    "partner_system": "lacp.partner.sysid",
+    "partner_key": "lacp.partner.key",
+    "partner_port": "lacp.partner.port",
+
+    # LLDP
+    "lldp_name": "lldp.tlv.system.name",
+    "lldp_port_desc": "lldp.port.desc",
+    "lldp_port_id": "lldp.port.id",
+    "lldp_mgmt": "lldp.mgn.addr.ip4",
+
+    # CDP
+    "cdp_device": "cdp.deviceid",
+    "cdp_port": "cdp.portid",
+    "cdp_native": "cdp.native_vlan",
+    "cdp_platform": "cdp.platform",
+    "cdp_mgmt": "cdp.nrgyz.ip_address",
+}
+
+
+FIELD_ORDER = []
+FIELD_KEYS = []
+
+for key, field in FIELD_MAP.items():
+
+    if not field:
+        continue
+
+    if field in FIELD_ORDER:
+        continue
+
+    FIELD_KEYS.append(key)
+    FIELD_ORDER.append(field)
+
+
+# ============================================================
+# L2 STATE
+# ============================================================
+
+def blank_l2():
+    return {
+        "protocols": set(),
+        "vlans": set(),
+
+        "switch": "--",
+        "port": "--",
+        "port_desc": "--",
+        "native_vlan": "--",
+        "mgmt": "--",
+        "platform": "--",
+
+        "lacp_system": "--",
+        "lacp_port": "--",
+        "lacp_key": "--",
+        "lacp_state": "--",
+        "lacp_active": False,
+        "lacp_aggregate": False,
+        "lacp_sync": False,
+        "lacp_collect": False,
+        "lacp_distribute": False,
+        "lacp_defaulted": False,
+
+        "partner_system": "--",
+        "partner_port": "--",
+        "partner_key": "--",
+
+        "last_src": "--",
+    }
+
+
+l2 = blank_l2()
+last_seen_l2 = blank_l2()
+stale = False
+
+
+def truth(value):
+    return str(value).strip().lower() in (
+        "1",
+        "true",
+        "yes",
+        "set",
+    )
+
+
+def valid_mac(value):
+    return bool(
+        re.fullmatch(
+            r"[0-9a-fA-F]{2}"
+            r"(?::[0-9a-fA-F]{2}){5}",
+            str(value).strip(),
+        )
+    )
+
+
+def meaningful_partner(value):
+    value = str(value).strip().lower()
+
+    return (
+        valid_mac(value)
+        and value != "00:00:00:00:00:00"
+    )
+
+
+def add_vlans(value):
+    for n in re.findall(
+        r"\b([0-9]{1,4})\b",
+        str(value),
+    ):
+        try:
+            vlan = int(n)
+
+            if 1 <= vlan <= 4094:
+                l2["vlans"].add(vlan)
+
+        except Exception:
+            pass
+
+
+def set_if_good(key, value):
+    value = str(value).strip()
+
+    if not value:
+        return
+
+    if value in ("0", "00:00:00:00:00:00"):
+        return
+
+    l2[key] = value
+
+
+def protocol_from_row(proto, dst, etype):
+    p = str(proto).upper()
+
+    found = set()
+
+    for name in (
+        "LLDP",
+        "CDP",
+        "LACP",
+        "STP",
+        "PVST",
+        "DTP",
+        "VTP",
+    ):
+        if name in p:
+            found.add(name)
+
+    # Fallback identification from Ethernet values.
+    if str(etype).lower() == "0x8809":
+        found.add("LACP")
+
+    if str(etype).lower() == "0x88cc":
+        found.add("LLDP")
+
+    if str(dst).lower() == "01:80:c2:00:00:00":
+        found.add("STP")
+
+    if str(dst).lower() == "01:00:0c:cc:cc:cd":
+        found.add("PVST")
+
+    return found
+
+
+def infer_mode():
+    protocols = l2["protocols"]
+    vlan_count = len(l2["vlans"])
+
+    lacp = "LACP" in protocols
+
+    trunk_evidence = (
+        "DTP" in protocols
+        or vlan_count >= 2
+    )
+
+    tagged = vlan_count >= 1
+
+    if lacp and trunk_evidence:
+        return "TRUNK/LAG*"
+
+    if lacp:
+        return "LAG MEMBER*"
+
+    if trunk_evidence:
+        return "TRUNK*"
+
+    if tagged:
+        return "TAGGED*"
+
+    return "UNKNOWN"
+
+
+def protocol_summary():
+    order = (
+        "LLDP",
+        "CDP",
+        "LACP",
+        "STP",
+        "PVST",
+        "DTP",
+        "VTP",
+    )
+
+    found = [
+        name
+        for name in order
+        if name in l2["protocols"]
+    ]
+
+    if l2["vlans"]:
+        found.append("802.1Q")
+
+    return (
+        "+".join(found)
+        if found
+        else "--"
+    )
+
+
+def vlan_summary():
+    values = sorted(l2["vlans"])
+
+    if not values:
+        return "--"
+
+    if len(values) <= 4:
+        return ",".join(
+            str(v)
+            for v in values
+        )
+
+    return (
+        ",".join(
+            str(v)
+            for v in values[:3]
+        )
+        + f"+{len(values)-3}"
+    )
+
+
+def lacp_status():
+    if "LACP" not in l2["protocols"]:
+        return "--"
+
+    if l2["lacp_active"]:
+        state = "ACTIVE"
+    else:
+        state = "PASSIVE"
+
+    if l2["lacp_defaulted"]:
+        state += "/DEFAULT"
+
+    elif l2["lacp_sync"]:
+        state += "/SYNC"
+
+    return state
+
+
+def partner_summary():
+    system = l2["partner_system"]
+
+    if meaningful_partner(system):
+
+        port = l2["partner_port"]
+
+        if port not in ("", "--", "0"):
+            return f"{system}/{port}"
+
+        return system
+
+    if "LACP" in l2["protocols"]:
+
+        if l2["lacp_defaulted"]:
+            return "DEFAULTED"
+
+        return "NONE"
+
+    return "--"
+
+
+# ============================================================
+# PERSISTENT PASSIVE L2 CAPTURE
+# ============================================================
+
+def process_l2_row(line, my_connection):
+    global l2
+
+    if my_connection != connection_id:
+        return
+
+    values = line.rstrip("\r\n").split("\t")
+
+    while len(values) < len(FIELD_KEYS):
+        values.append("")
+
+    row = dict(
+        zip(
+            FIELD_KEYS,
+            values,
+        )
+    )
+
+    proto = row.get("protocol", "")
+    src = row.get("src", "")
+    dst = row.get("dst", "")
+    etype = row.get("etype", "")
+
+    protocols = protocol_from_row(
+        proto,
+        dst,
+        etype,
+    )
+
+    with l2_lock:
+
+        l2["protocols"].update(protocols)
+
+        if src:
+            l2["last_src"] = src
+
+        add_vlans(
+            row.get("vlan", "")
+        )
+
+        # LLDP
+        set_if_good(
+            "switch",
+            row.get("lldp_name", ""),
+        )
+
+        set_if_good(
+            "port",
+            row.get("lldp_port_id", ""),
+        )
+
+        set_if_good(
+            "port_desc",
+            row.get("lldp_port_desc", ""),
+        )
+
+        set_if_good(
+            "mgmt",
+            row.get("lldp_mgmt", ""),
+        )
+
+        # CDP identification / enrichment.
+        #
+        # On Cisco ports CDP Port ID is preferred for PORT.
+        # Example:
+        #   TenGigabitEthernet1/0/48
+        cdp_device = str(
+            row.get("cdp_device", "")
+        ).strip()
+
+        if cdp_device:
+            set_if_good(
+                "switch",
+                cdp_device,
+            )
+
+        cdp_port = str(
+            row.get("cdp_port", "")
+        ).strip()
+
+        if cdp_port:
+            set_if_good(
+                "port",
+                cdp_port,
+            )
+
+        set_if_good(
+            "native_vlan",
+            row.get("cdp_native", ""),
+        )
+
+        set_if_good(
+            "platform",
+            row.get("cdp_platform", ""),
+        )
+
+        set_if_good(
+            "mgmt",
+            row.get("cdp_mgmt", ""),
+        )
+
+        # LACP
+        set_if_good(
+            "lacp_system",
+            row.get("lacp_system", ""),
+        )
+
+        set_if_good(
+            "lacp_port",
+            row.get("lacp_port", ""),
+        )
+
+        set_if_good(
+            "lacp_key",
+            row.get("lacp_key", ""),
+        )
+
+        set_if_good(
+            "lacp_state",
+            row.get("lacp_state", ""),
+        )
+
+        if row.get("lacp_active", ""):
+            l2["lacp_active"] = truth(
+                row["lacp_active"]
+            )
+
+        if row.get("lacp_aggregate", ""):
+            l2["lacp_aggregate"] = truth(
+                row["lacp_aggregate"]
+            )
+
+        if row.get("lacp_sync", ""):
+            l2["lacp_sync"] = truth(
+                row["lacp_sync"]
+            )
+
+        if row.get("lacp_collect", ""):
+            l2["lacp_collect"] = truth(
+                row["lacp_collect"]
+            )
+
+        if row.get("lacp_distribute", ""):
+            l2["lacp_distribute"] = truth(
+                row["lacp_distribute"]
+            )
+
+        if row.get("lacp_defaulted", ""):
+            l2["lacp_defaulted"] = truth(
+                row["lacp_defaulted"]
+            )
+
+        set_if_good(
+            "partner_system",
+            row.get("partner_system", ""),
+        )
+
+        set_if_good(
+            "partner_port",
+            row.get("partner_port", ""),
+        )
+
+        set_if_good(
+            "partner_key",
+            row.get("partner_key", ""),
+        )
+
+
+def l2_worker(my_connection):
+    global l2_process
+
+    args = [
+        "sudo",
+        "-n",
+        "/usr/local/bin/ethernet-l2-capture",
+    ]
+
+    for field in FIELD_ORDER:
+        args.extend(
+            ["-e", field]
+        )
+
+    try:
+        p = subprocess.Popen(
+            args,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.DEVNULL,
+            text=True,
+            bufsize=1,
+        )
+
+        with l2_lock:
+            l2_process = p
+
+        if p.stdout is not None:
+
+            for line in p.stdout:
+
+                if not running:
+                    break
+
+                if my_connection != connection_id:
+                    break
+
+                if not carrier():
+                    break
+
+                process_l2_row(
+                    line,
+                    my_connection,
+                )
+
+    except Exception:
+        pass
+
+    finally:
+
+        with l2_lock:
+
+            p = l2_process
+
+            if p is not None:
+
+                try:
+                    if p.poll() is None:
+                        p.terminate()
+                except Exception:
+                    pass
+
+            l2_process = None
+
+
+def start_l2_capture():
+    global l2_thread
+
+    my_connection = connection_id
+
+    t = threading.Thread(
+        target=l2_worker,
+        args=(my_connection,),
+        daemon=True,
+    )
+
+    l2_thread = t
+    t.start()
+
+
+def stop_l2_capture():
+    global l2_process
+
+    with l2_lock:
+
+        p = l2_process
+
+        if p is None:
+            return
+
+        try:
+            if p.poll() is None:
+                p.terminate()
+        except Exception:
+            pass
+
+    if p is not None:
+
+        try:
+            p.wait(timeout=1)
+        except Exception:
+            try:
+                p.kill()
+            except Exception:
+                pass
+
+
+# ============================================================
+# STATIC HARDWARE
+# ============================================================
+
+adapter = adapter_info()
+driver, firmware = driver_info()
+
+tdr = (
+    "UNSUPPORTED"
+    if adapter in (
+        "RTL8153",
+        "RTL8156",
+    )
+    and driver == "r8152"
+    else "UNKNOWN"
+)
+
+
+# ============================================================
+# LIVE LOOP
+# ============================================================
+
+previous = None
+previous_time = time.monotonic()
+
+last_carrier = False
+
+session_baseline = {
+    "rx_errors": 0,
+    "tx_errors": 0,
+    "rx_dropped": 0,
+    "tx_dropped": 0,
+}
+
+
+while running:
+
+    now = time.monotonic()
+
+    if not interface_exists():
+
+        stop_l2_capture()
+
+        emit(
+            event="state",
+            interface=IFACE,
+            adapter="MISSING",
+            driver="--",
+            firmware="--",
+
+            link="NO ADAPTER",
+            speed="--",
+            duplex="--",
+            ip="--",
+
+            rx_rate="0 B/s",
+            tx_rate="0 B/s",
+
+            rx_total="0 B",
+            tx_total="0 B",
+
+            rx_packets=0,
+            tx_packets=0,
+
+            errors=0,
+            drops=0,
+
+            switch="--",
+            port="--",
+            mode="UNKNOWN",
+            protocols="--",
+            vlans="--",
+            native_vlan="--",
+
+            lacp="--",
+            lacp_system="--",
+            lacp_port="--",
+            lacp_key="--",
+            partner="--",
+
+            stale=False,
+            tdr="--",
+        )
+
+        time.sleep(0.5)
+        continue
+
+    link = carrier()
+    current = statistics()
+
+    elapsed = max(
+        now - previous_time,
+        0.001,
+    )
+
+    if previous is None:
+
+        rx_rate = 0
+        tx_rate = 0
+
+    else:
+
+        rx_rate = max(
+            0,
+            current["rx_bytes"]
+            - previous["rx_bytes"],
+        ) / elapsed
+
+        tx_rate = max(
+            0,
+            current["tx_bytes"]
+            - previous["tx_bytes"],
+        ) / elapsed
+
+    previous = current
+    previous_time = now
+
+
+    # --------------------------------------------------------
+    # CABLE INSERTED
+    # --------------------------------------------------------
+
+    if link and not last_carrier:
+
+        connection_id += 1
+
+        stop_l2_capture()
+
+        with l2_lock:
+            l2 = blank_l2()
+            stale = False
+
+        session_baseline = {
+            "rx_errors":
+                current["rx_errors"],
+
+            "tx_errors":
+                current["tx_errors"],
+
+            "rx_dropped":
+                current["rx_dropped"],
+
+            "tx_dropped":
+                current["tx_dropped"],
+        }
+
+        start_l2_capture()
+
+
+    # --------------------------------------------------------
+    # CABLE REMOVED
+    # --------------------------------------------------------
+
+    elif not link and last_carrier:
+
+        connection_id += 1
+
+        stop_l2_capture()
+
+        with l2_lock:
+
+            if (
+                l2["protocols"]
+                or l2["switch"] != "--"
+                or l2["vlans"]
+            ):
+                last_seen_l2 = {
+                    k: (
+                        set(v)
+                        if isinstance(v, set)
+                        else v
+                    )
+                    for k, v in l2.items()
+                }
+
+                stale = True
+
+
+    last_carrier = link
+
+    speed, duplex = link_details()
+
+
+    # --------------------------------------------------------
+    # USE CURRENT OR LAST-SEEN L2 STATE
+    # --------------------------------------------------------
+
+    with l2_lock:
+
+        active_l2 = l2
+
+        if not link and stale:
+            active_l2 = last_seen_l2
+
+        # Temporarily point inference helpers at the selected data.
+        working = l2
+        l2 = active_l2
+
+        mode = infer_mode()
+        protocols = protocol_summary()
+        vlans = vlan_summary()
+        lacp = lacp_status()
+        partner = partner_summary()
+
+        switch = l2["switch"]
+        port = l2["port"]
+        port_desc = l2["port_desc"]
+        platform = l2["platform"]
+        mgmt = l2["mgmt"]
+        native_vlan = l2["native_vlan"]
+
+        lacp_system = l2["lacp_system"]
+        lacp_port = l2["lacp_port"]
+        lacp_key = l2["lacp_key"]
+
+        l2 = working
+
+
+    errors = max(
+        0,
+        (
+            current["rx_errors"]
+            - session_baseline["rx_errors"]
+        )
+        +
+        (
+            current["tx_errors"]
+            - session_baseline["tx_errors"]
+        ),
+    )
+
+    drops = max(
+        0,
+        (
+            current["rx_dropped"]
+            - session_baseline["rx_dropped"]
+        )
+        +
+        (
+            current["tx_dropped"]
+            - session_baseline["tx_dropped"]
+        ),
+    )
+
+
+    emit(
+        event="state",
+
+        interface=IFACE,
+        adapter=adapter,
+        driver=driver,
+        firmware=firmware,
+
+        link=(
+            "UP"
+            if link
+            else "WAITING"
+        ),
+
+        speed=(
+            speed
+            if link
+            else "--"
+        ),
+
+        duplex=(
+            duplex
+            if link
+            else "--"
+        ),
+
+        ip=(
+            ip_address()
+            if link
+            else "--"
+        ),
+
+        rx_rate=human_rate(rx_rate),
+        tx_rate=human_rate(tx_rate),
+
+        rx_total=human_bytes(
+            current["rx_bytes"]
+        ),
+
+        tx_total=human_bytes(
+            current["tx_bytes"]
+        ),
+
+        rx_packets=current["rx_packets"],
+        tx_packets=current["tx_packets"],
+
+        errors=errors,
+        drops=drops,
+
+        switch=switch,
+        port=port,
+        port_desc=port_desc,
+        platform=platform,
+        mgmt=mgmt,
+        mode=mode,
+        protocols=protocols,
+        vlans=vlans,
+        native_vlan=native_vlan,
+
+        lacp=lacp,
+        lacp_system=lacp_system,
+        lacp_port=lacp_port,
+        lacp_key=lacp_key,
+        partner=partner,
+
+        stale=(
+            bool(stale)
+            and not link
+        ),
+
+        tdr=tdr,
+    )
+
+    time.sleep(0.5)
+
+
+stop_l2_capture()

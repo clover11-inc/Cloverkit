@@ -1,0 +1,50 @@
+#!/bin/bash
+
+FILE="/mnt/config/lcd-mode"
+
+current() {
+    MODE="$(cat "$FILE" 2>/dev/null || echo graphical)"
+
+    case "$MODE" in
+        graphical|cli) ;;
+        *) MODE="graphical" ;;
+    esac
+
+    echo "$MODE"
+}
+
+case "${1:-}" in
+
+    graphical|gui)
+        echo graphical | sudo tee "$FILE" >/dev/null
+        echo "LCD MODE: GRAPHICAL"
+        ;;
+
+    cli|console)
+        echo cli | sudo tee "$FILE" >/dev/null
+        echo "LCD MODE: CLI"
+        ;;
+
+    toggle)
+        if [ "$(current)" = "graphical" ]; then
+            echo cli | sudo tee "$FILE" >/dev/null
+            echo "LCD MODE: CLI"
+        else
+            echo graphical | sudo tee "$FILE" >/dev/null
+            echo "LCD MODE: GRAPHICAL"
+        fi
+        ;;
+
+    status|"")
+        echo "LCD MODE: $(current | tr '[:lower:]' '[:upper:]')"
+        ;;
+
+    *)
+        echo "Usage:"
+        echo "  lcd-mode"
+        echo "  lcd-mode graphical"
+        echo "  lcd-mode cli"
+        echo "  lcd-mode toggle"
+        exit 1
+        ;;
+esac

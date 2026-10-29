@@ -1,0 +1,117 @@
+#!/bin/bash
+
+IP=/usr/sbin/ip
+IPERF=/usr/bin/iperf3
+
+TARGET="${1:-}"
+REQ_IF="${2:-}"
+
+if [ -z "$TARGET" ]; then
+    echo "Usage:"
+    echo "  iperf-client <server-ip>"
+    echo "  iperf-client <server-ip> <interface>"
+    echo
+    echo "Examples:"
+    echo "  iperf-client 192.0.2.10"
+    echo "  iperf-client 192.0.2.10 eth0"
+    echo "  iperf-client 192.0.2.10 wlan0"
+    exit 1
+fi
+
+if ! command -v "$IPERF" >/dev/null 2>&1; then
+    echo "ERROR: iperf3 not installed"
+    exit 1
+fi
+
+get_ip() {
+    "$IP" -4 -o addr show dev "$1" 2>/dev/null |
+        awk '{print $4}' |
+        cut -d/ -f1 |
+        head -1
+}
+
+usable_if() {
+    local DEV="$1"
+
+    "$IP" link show "$DEV" >/dev/null 2>&1 || return 1
+
+    local ADDR
+    ADDR="$(get_ip "$DEV")"
+
+    [ -n "$ADDR" ] || return 1
+
+    echo "$DEV"
+    return 0
+}
+
+select_if() {
+    if [ -n "$REQ_IF" ]; then
+        usable_if "$REQ_IF"
+        return $?
+    fi
+
+    # Prefer Ethernet.
+    for DEV in $("$IP" -o link show | awk -F': ' '{print $2}' | grep '^eth'); do
+        usable_if "$DEV" && return 0
+    done
+
+    # Fall back to WiFi.
+    for DEV in $("$IP" -o link show | awk -F': ' '{print $2}' | grep '^wlan'); do
+        usable_if "$DEV" && return 0
+    done
+
+    return 1
+}
+
+IFACE="$(select_if)"
+
+if [ -z "$IFACE" ]; then
+    echo "ERROR: No usable Ethernet or WiFi interface"
+    exit 1
+fi
+
+SRC_IP="$(get_ip "$IFACE")"
+
+echo "IPERF CLIENT"
+echo "Server    : $TARGET"
+echo "Via       : $IFACE"
+echo "Source IP : $SRC_IP"
+echo
+
+echo "ROUTE"
+ROUTE="$("$IP" route get "$TARGET" from "$SRC_IP" 2>/dev/null)"
+echo "$ROUTE"
+echo
+
+ROUTE_IF="$(echo "$ROUTE" | sed -n 's/.* dev \([^ ]*\).*/\1/p' | head -1)"
+
+if [ "$ROUTE_IF" != "$IFACE" ]; then
+    echo "WARNING"
+    echo "Requested : $IFACE"
+    echo "Kernel    : ${ROUTE_IF:-unknown}"
+    echo
+    echo "Refusing to claim this is a $IFACE test."
+    echo "Route must be forced before testing."
+    exit 2
+fi
+
+echo "FORWARD"
+"$IPERF" -c "$TARGET" -B "$SRC_IP" -t 5
+FWD=$?
+
+if [ "$FWD" -ne 0 ]; then
+    echo
+    echo "Forward test failed."
+    exit "$FWD"
+fi
+
+echo
+echo "REVERSE"
+"$IPERF" -c "$TARGET" -B "$SRC_IP" -t 5 -R
+REV=$?
+
+echo
+echo "TESTED"
+echo "$IFACE ($SRC_IP) -> network -> $TARGET"
+
+exit "$REV"

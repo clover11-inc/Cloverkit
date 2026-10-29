@@ -1,0 +1,10 @@
+[Unit]
+Description=Lock CloverKit Vehicle Diagnostics SSH access at boot
+After=local-fs.target
+Before=ssh.service sshd.service
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/passwd -l conveh
+RemainAfterExit=yes
+[Install]
+WantedBy=multi-user.target

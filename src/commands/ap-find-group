@@ -1,0 +1,230 @@
+#!/bin/bash
+
+IW="/usr/sbin/iw"
+
+if [ "$#" -lt 1 ]; then
+    echo "Usage: ap-find-group <BSSID> [BSSID...]"
+    exit 1
+fi
+
+TARGETS=()
+
+for T in "$@"; do
+    T="${T^^}"
+
+    if [[ "$T" =~ ^([0-9A-F]{2}:){5}[0-9A-F]{2}$ ]]; then
+        TARGETS+=("$T")
+    fi
+done
+
+if [ "${#TARGETS[@]}" -eq 0 ]; then
+    echo "No valid BSSIDs supplied."
+    exit 1
+fi
+
+IF=""
+
+for DEVPATH in /sys/class/net/wlan*; do
+    [ -e "$DEVPATH" ] || continue
+
+    DEV=$(basename "$DEVPATH")
+    [ "$DEV" = "wlan0" ] && continue
+
+    IF="$DEV"
+    break
+done
+
+if [ -z "$IF" ]; then
+    echo "No external WiFi adapter detected."
+    exit 1
+fi
+
+
+quality() {
+    local DBM="$1"
+
+    if [ "$DBM" -ge -49 ]; then
+        echo "Excellent"
+    elif [ "$DBM" -ge -59 ]; then
+        echo "Good"
+    elif [ "$DBM" -ge -69 ]; then
+        echo "Fair"
+    elif [ "$DBM" -ge -79 ]; then
+        echo "Weak"
+    elif [ "$DBM" -ge -89 ]; then
+        echo "Poor"
+    else
+        echo "Very Poor"
+    fi
+}
+
+
+TARGET_LIST=$(IFS=,; echo "${TARGETS[*]}")
+
+SAMPLES=()
+PREV_AVG=""
+MISSES=0
+
+cleanup() {
+    echo
+    echo "AP Finder stopped."
+    exit 0
+}
+
+trap cleanup INT TERM
+
+
+while true; do
+
+    RESULT=$(
+        sudo timeout 10 "$IW" dev "$IF" scan 2>/dev/null |
+        awk -v targets="$TARGET_LIST" '
+        BEGIN {
+            n=split(tolower(targets), wanted, ",")
+
+            for(i=1;i<=n;i++)
+                target[wanted[i]]=1
+        }
+
+        function dump() {
+            if(match_target && signal!="") {
+                printf "%s|%s|%s|%s\n",
+                    signal, freq, ssid, mac
+            }
+        }
+
+        /^BSS / {
+            dump()
+
+            mac=tolower($2)
+            sub(/\(.*/, "", mac)
+
+            match_target=(mac in target)
+
+            signal=""
+            freq=""
+            ssid=""
+        }
+
+        match_target && /freq:/ {
+            freq=$2
+        }
+
+        match_target && /signal:/ {
+            signal=$2
+        }
+
+        match_target && /^[ \t]*SSID:/ {
+            line=$0
+            sub(/^[ \t]*SSID:[ \t]*/, "", line)
+            ssid=line
+        }
+
+        END {
+            dump()
+        }
+        ' |
+        sort -t'|' -k1,1nr |
+        head -1
+    )
+
+    if [ -z "$RESULT" ]; then
+        MISSES=$((MISSES + 1))
+
+        echo "=================================================="
+        echo "                  AP FINDER"
+        echo "=================================================="
+        echo "Physical AP target"
+        echo "Members : ${#TARGETS[@]}"
+        echo
+        echo "Target not currently seen."
+
+        if [ "$MISSES" -ge 3 ]; then
+            echo "Status  : LOST"
+        else
+            echo "Status  : Scanning..."
+        fi
+
+        echo
+        echo "Ctrl+C to stop."
+
+        continue
+    fi
+
+    MISSES=0
+
+    IFS='|' read -r SIGNAL FREQ SSID BSSID <<< "$RESULT"
+
+    DBM="${SIGNAL%.*}"
+    [ -z "$SSID" ] && SSID="<hidden>"
+
+    F="${FREQ%%.*}"
+
+    if [ "$F" -lt 3000 ] 2>/dev/null; then
+        BAND="2.4G"
+        if [ "$F" -eq 2484 ]; then
+            CH=14
+        else
+            CH=$(( (F - 2407) / 5 ))
+        fi
+    elif [ "$F" -lt 5925 ] 2>/dev/null; then
+        BAND="5G"
+        CH=$(( (F - 5000) / 5 ))
+    else
+        BAND="6G"
+        CH=$(( (F - 5950) / 5 ))
+    fi
+
+    SAMPLES+=("$DBM")
+
+    if [ "${#SAMPLES[@]}" -gt 4 ]; then
+        SAMPLES=("${SAMPLES[@]:1}")
+    fi
+
+    SUM=0
+
+    for S in "${SAMPLES[@]}"; do
+        SUM=$((SUM + S))
+    done
+
+    AVG=$((SUM / ${#SAMPLES[@]}))
+    TREND="----"
+
+    if [ -n "$PREV_AVG" ]; then
+        DIFF=$((AVG - PREV_AVG))
+
+        if [ "$DIFF" -ge 5 ]; then
+            TREND="CLOSER ++"
+        elif [ "$DIFF" -ge 2 ]; then
+            TREND="CLOSER +"
+        elif [ "$DIFF" -le -5 ]; then
+            TREND="FARTHER --"
+        elif [ "$DIFF" -le -2 ]; then
+            TREND="FARTHER -"
+        else
+            TREND="STEADY"
+        fi
+    fi
+
+    PREV_AVG="$AVG"
+    QUAL=$(quality "$AVG")
+
+    echo "=================================================="
+    echo "                  AP FINDER"
+    echo "=================================================="
+    echo "Physical AP target"
+    echo "Members  : ${#TARGETS[@]}"
+    echo
+    echo "Best BSSID: ${BSSID^^}"
+    echo "SSID      : $SSID"
+    echo "Radio     : $BAND  Channel $CH"
+    echo
+    echo "NOW       : ${DBM} dBm"
+    echo "AVERAGE   : ${AVG} dBm"
+    echo "QUALITY   : $QUAL"
+    echo "TREND     : $TREND"
+    echo
+    echo "Tracking strongest member of this AP."
+    echo "Ctrl+C to stop."
+
+done

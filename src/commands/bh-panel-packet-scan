@@ -1,0 +1,63 @@
+#!/usr/bin/env python3
+import sys as _identity_sys
+_identity_sys.path.insert(0,'/usr/local/lib/bh-interactive')
+from cloverkit_radio_identity import assert_layout as _assert_radio_layout
+_assert_radio_layout()
+"""Keep the scanner pipeline alive while Stop requests a final analysis."""
+import os
+from pathlib import Path
+import signal
+import subprocess
+import sys
+import tempfile
+import time
+
+NAMES = {'packet-scan', 'packet-beacon', 'packet-ndp'}
+
+def supervise(argv, stop_file):
+    requested = None
+    def stop(sig, frame):
+        nonlocal requested
+        if requested is None:
+            requested = time.monotonic()
+            stop_file.touch()
+    previous = {sig: signal.signal(sig, stop) for sig in (signal.SIGINT, signal.SIGTERM)}
+    proc = None
+    try:
+        # Stop signals to the panel's group cannot kill tee, workers or analysis.
+        proc = subprocess.Popen(argv, start_new_session=True)
+        while proc.poll() is None:
+            if requested is not None and time.monotonic()-requested > 120:
+                print('ERROR: final analysis exceeded 120s; final results are incomplete.', flush=True)
+                os.killpg(proc.pid, signal.SIGKILL)
+                proc.wait()
+                recovery = stop_file.parent/'restore.sh'
+                if recovery.is_file():
+                    try:
+                        subprocess.run(['/bin/bash', str(recovery)], timeout=30, check=True)
+                    except (subprocess.SubprocessError, OSError):
+                        print('ERROR: emergency radio restore failed; check external radio status.', flush=True)
+                return 1
+            time.sleep(.05)
+        return proc.returncode
+    finally:
+        for sig, handler in previous.items():
+            signal.signal(sig, handler)
+
+def main():
+    if len(sys.argv) != 2 or sys.argv[1] not in NAMES:
+        print('Usage: bh-panel-packet-scan <packet-scan|packet-beacon|packet-ndp>')
+        return 2
+    if os.geteuid() != 0:
+        os.execvp('sudo', ['sudo', '-n', '/usr/local/bin/bh-panel-packet-scan', sys.argv[1]])
+    wrapper = Path('/usr/local/lib/bh-interactive')/(sys.argv[1]+'-launch.sh')
+    if not wrapper.is_file():
+        print('ERROR: interactive scanner copy missing; reinstall the toolkit.')
+        return 1
+    with tempfile.TemporaryDirectory(prefix='bh-scan-control-') as folder:
+        stop_file = Path(folder)/'stop'
+        os.environ.update(CLOVERKIT_SCAN_STOP_FILE=str(stop_file), BH_LCD_DISPATCHED='1', PYTHONUNBUFFERED='1')
+        return supervise(['/bin/bash', str(wrapper)], stop_file)
+
+if __name__ == '__main__':
+    raise SystemExit(main())

@@ -1,0 +1,3 @@
+#!/bin/sh
+CLOVERKIT_PROJECT="$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)"
+exec python3 "$CLOVERKIT_PROJECT/tools/cloverkit.py" "$@"

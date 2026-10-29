@@ -1,0 +1,25 @@
+{
+  "schema": 1,
+  "brand": "CloverKit",
+  "version": "0.1.0-alpha.2",
+  "date": "2026-10-29",
+  "channel": "public-alpha-first-version",
+  "license": "GPL-2.0-or-later (CloverKit-authored code; component exceptions in NOTICE.md)",
+  "host_activation_enabled": false,
+  "isolated_install_available": true,
+  "feature_topics": 39,
+  "companion": {
+    "included": false,
+    "status": "not-distributed",
+    "compatible_app_required_for_flipper_controls": true
+  },
+  "validation": "build/validation.json",
+  "privacy": "RELEASE-MANIFEST.json: privacy",
+  "notes": [
+    "No personal runtime configuration or data bundled.",
+    "Nothing published or uploaded by this release build.",
+    "Working installation was not replaced."
+  ],
+  "fresh_card_builder": true,
+  "standalone_alongside_installer_included": false
+}

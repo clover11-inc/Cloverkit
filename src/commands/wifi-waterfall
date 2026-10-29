@@ -1,0 +1,4 @@
+#!/usr/bin/env python3
+import os,sys
+if len(sys.argv)!=1:raise SystemExit('Usage: wifi-waterfall')
+os.execv('/usr/local/bin/bh-panel',['bh-panel','--waterfall'])

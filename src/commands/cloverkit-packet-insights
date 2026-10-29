@@ -1,0 +1,8 @@
+#!/usr/bin/python3
+import sys
+sys.path.insert(0,'/usr/local/lib/bh-interactive')
+import os
+if os.geteuid()!=0 or len(sys.argv)!=1:raise SystemExit('Use no-argument installed packet report launcher')
+from cloverkit_report import main
+try:raise SystemExit(main(['packets']))
+except KeyboardInterrupt:raise SystemExit(130)

@@ -1,0 +1,117 @@
+#!/bin/bash
+
+IF="${1:-eth0}"
+TSHARK="/usr/bin/tshark"
+ETHTOOL="/usr/sbin/ethtool"
+IP="/usr/sbin/ip"
+
+if ! "$IP" link show "$IF" >/dev/null 2>&1; then
+    echo "ETHERNET"
+    echo "Interface : $IF"
+    echo "Status    : NOT FOUND"
+    exit 1
+fi
+
+LINK=$("$ETHTOOL" "$IF" 2>/dev/null | awk -F': ' '/Link detected:/{print $2}')
+SPEED=$("$ETHTOOL" "$IF" 2>/dev/null | awk -F': ' '/Speed:/{print $2}')
+DUPLEX=$("$ETHTOOL" "$IF" 2>/dev/null | awk -F': ' '/Duplex:/{print $2}')
+
+ADDR=$("$IP" -4 -o addr show "$IF" 2>/dev/null |
+       awk '{print $4; exit}')
+
+[ -z "$ADDR" ] && ADDR="-"
+[ -z "$LINK" ] && LINK="unknown"
+[ -z "$SPEED" ] && SPEED="-"
+[ -z "$DUPLEX" ] && DUPLEX="-"
+
+echo "ETHERNET"
+echo "Interface : $IF"
+echo "Link      : $LINK"
+
+if [ "$LINK" = "yes" ]; then
+    echo "Speed     : $SPEED $DUPLEX"
+fi
+
+echo "IP        : $ADDR"
+
+if [ "$LINK" != "yes" ]; then
+    exit 0
+fi
+
+echo
+echo "Listening for LLDP/CDP..."
+
+TMP=$(mktemp)
+trap 'rm -f "$TMP"' EXIT
+
+sudo timeout 36 "$TSHARK" \
+    -i "$IF" \
+    -n \
+    -c 1 \
+    -f 'ether proto 0x88cc or ether dst 01:00:0c:cc:cc:cc' \
+    -V \
+    >"$TMP" 2>/dev/null
+
+if [ ! -s "$TMP" ]; then
+    echo
+    echo "NEIGHBOR"
+    echo "Status    : No LLDP/CDP received"
+    exit 0
+fi
+
+PROTO="UNKNOWN"
+
+grep -q "Link Layer Discovery Protocol" "$TMP" && PROTO="LLDP"
+grep -q "Cisco Discovery Protocol" "$TMP" && PROTO="CDP"
+
+NAME=$(sed -n 's/^[[:space:]]*System Name = //p' "$TMP" | head -1)
+PORT=$(sed -n 's/^[[:space:]]*Port Description = //p' "$TMP" | head -1)
+DESC=$(sed -n 's/^[[:space:]]*System Description = //p' "$TMP" | head -1)
+
+MAC=$(sed -n 's/^[[:space:]]*Chassis Id: //p' "$TMP" | head -1)
+
+VLAN=$(sed -n \
+    's/.*802\.1Q Virtual LAN.*ID: \([0-9][0-9]*\).*/\1/p' \
+    "$TMP" | head -1)
+
+# CDP fallbacks
+[ -z "$NAME" ] && \
+NAME=$(sed -n 's/^[[:space:]]*Device ID: //p' "$TMP" | head -1)
+
+[ -z "$PORT" ] && \
+PORT=$(sed -n 's/^[[:space:]]*Port ID: //p' "$TMP" | head -1)
+
+PLATFORM=$(sed -n 's/^[[:space:]]*Platform: //p' "$TMP" | head -1)
+
+MGMT=$(sed -n \
+    's/^[[:space:]]*Management Address: //p' \
+    "$TMP" | head -1)
+
+[ -z "$NAME" ] && NAME="-"
+[ -z "$PORT" ] && PORT="-"
+[ -z "$DESC" ] && DESC="-"
+[ -z "$MAC" ] && MAC="-"
+[ -z "$VLAN" ] && VLAN="-"
+[ -z "$PLATFORM" ] && PLATFORM="-"
+[ -z "$MGMT" ] && MGMT="-"
+
+echo
+echo "NEIGHBOR"
+echo "Protocol  : $PROTO"
+echo "Name      : $NAME"
+echo "Port      : $PORT"
+
+if [ "$DESC" != "-" ]; then
+    echo "Details   : $DESC"
+fi
+
+if [ "$PLATFORM" != "-" ]; then
+    echo "Platform  : $PLATFORM"
+fi
+
+if [ "$MGMT" != "-" ]; then
+    echo "Mgmt IP   : $MGMT"
+fi
+
+echo "VLAN      : $VLAN"
+echo "MAC       : $MAC"

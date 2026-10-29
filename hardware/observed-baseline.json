@@ -1,0 +1,55 @@
+{
+  "schema": 1,
+  "scope": "Non-identifying development baseline observed read-only on 2026-10-27; not a universal compatibility certification",
+  "board": "Flipper Blackhat",
+  "architecture": "armv7l",
+  "kernel": "6.16.8-edge-sunxi",
+  "python": "3.14.6",
+  "framebuffer": [
+    480,
+    480
+  ],
+  "native_radio": {
+    "role": "protected uplink",
+    "bus": "sdio",
+    "driver": "rtw88_8723ds"
+  },
+  "usb_radios": {
+    "count": 2,
+    "vid_pid": "0bda:c820",
+    "reported_product": "Realtek 802.11ac NIC",
+    "wifi_driver": "rtw88_8821cu",
+    "bluetooth_driver": "btusb",
+    "host_links": "USB 2.0 480 Mb/s, EHCI and MUSB paths",
+    "retail_model_revision": "not independently verified"
+  },
+  "os_tools": {
+    "bluez": "5.87-1",
+    "iw": "6.17-1",
+    "tcpdump": "4.99.6-2",
+    "tshark": "4.6.6-1"
+  },
+  "not_recorded": [
+    "MACs",
+    "USB serials",
+    "hostnames",
+    "SSIDs",
+    "IP addresses",
+    "connection profiles",
+    "credentials"
+  ],
+  "not_attached_during_inventory": [
+    "OBD adapter",
+    "USB Ethernet adapter",
+    "USB console adapter"
+  ],
+  "firmware": {
+    "package": "armbian-firmware 26.02.0-trunk",
+    "module_requirements": [
+      "rtw88/rtw8821c_fw.bin",
+      "rtw88/rtw8723d_fw.bin"
+    ],
+    "files_present": true,
+    "blobs_bundled": false
+  }
+}

@@ -1,0 +1,65 @@
+{
+  "schema": 1,
+  "sources": [
+    {
+      "name": "obdex",
+      "url": "https://github.com/foerbsnavi/obdex",
+      "revision": "a9d0220bdb993cd5f545ee762a0531463a2d0fbf",
+      "license": "CC0-1.0"
+    },
+    {
+      "name": "dtc-database",
+      "url": "https://github.com/Wal33D/dtc-database",
+      "revision": "04c43d72e7db7197658b6f72fe582c5076d9eee8",
+      "license": "MIT"
+    },
+    {
+      "name": "SAEJ1979",
+      "url": "https://github.com/OBDb/SAEJ1979",
+      "revision": "06690177d2d5e11dbf82566297128d673b5a03a7",
+      "license": "CC-BY-SA-4.0"
+    }
+  ],
+  "counts": {
+    "definitions": 28172,
+    "unique_codes": 12316,
+    "makes": [
+      "ACURA",
+      "AUDI",
+      "BMW",
+      "BUICK",
+      "CADILLAC",
+      "CHEVY",
+      "CHRYSLER",
+      "DODGE",
+      "FORD",
+      "GEO",
+      "GM",
+      "GMC",
+      "HONDA",
+      "INFINITI",
+      "JAGUAR",
+      "JEEP",
+      "KIA",
+      "LEXUS",
+      "LINCOLN",
+      "MAZDA",
+      "MERCEDES",
+      "MERCURY",
+      "MITSUBISHI",
+      "NISSAN",
+      "OLDSMOBILE",
+      "OTHER",
+      "PLYMOUTH",
+      "PONTIAC",
+      "SATURN",
+      "SUBARU",
+      "SUZUKI",
+      "TOYOTA",
+      "VOLKSWAGEN"
+    ],
+    "rejected_rows": 168
+  },
+  "sha256": "d82d35d8da5422d8dba2600bfa2a5e2f984f8a9937a4eacd2b14396d07cd0708",
+  "policy": "All eligible rows retained; conflicting sources preserved. No repair, price, or driving-safety claims inferred."
+}

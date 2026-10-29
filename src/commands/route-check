@@ -1,0 +1,276 @@
+#!/bin/bash
+
+IP="/usr/sbin/ip"
+IW="/usr/sbin/iw"
+ETHTOOL="/usr/sbin/ethtool"
+NMCLI="/usr/bin/nmcli"
+
+echo "ROUTE CHECK"
+echo
+
+echo "INTERFACES"
+
+while read -r IF STATE; do
+    [ "$IF" = "lo" ] && continue
+
+    TYPE="OTHER"
+
+    if [[ "$IF" == tun* ]] || [[ "$IF" == wg* ]]; then
+        TYPE="VPN"
+    elif [ -d "/sys/class/net/$IF/wireless" ]; then
+        TYPE="WiFi"
+    elif [ -e "/sys/class/net/$IF/device" ]; then
+        TYPE="Ethernet"
+    fi
+
+    IPV4=$(
+        "$IP" -4 -o addr show "$IF" 2>/dev/null |
+        awk '{print $4; exit}'
+    )
+
+    [ -z "$IPV4" ] && IPV4="-"
+
+    printf "%-7s %-9s %-18s %s\n" \
+        "$IF" "$TYPE" "$IPV4" "$STATE"
+
+done < <(
+    "$IP" -br link |
+    awk '{print $1,$2}'
+)
+
+echo
+echo "UPLINK PREFERENCE"
+
+printf "%-10s %-12s %-10s %s\n" \
+    "Interface" "Configured" "Active" "Role"
+
+mapfile -t PHYSICAL_DEFAULTS < <(
+    "$IP" route show default |
+    grep -vE ' dev (tun|wg)' |
+    while read -r LINE; do
+        DEV=$(echo "$LINE" |
+            awk '{for(i=1;i<=NF;i++) if($i=="dev"){print $(i+1); exit}}')
+
+        METRIC=$(echo "$LINE" |
+            awk '{for(i=1;i<=NF;i++) if($i=="metric"){print $(i+1); exit}}')
+
+        SRC=$(echo "$LINE" |
+            awk '{for(i=1;i<=NF;i++) if($i=="src"){print $(i+1); exit}}')
+
+        [ -z "$METRIC" ] && METRIC="0"
+        [ -z "$SRC" ] && SRC="-"
+
+        echo "$METRIC|$DEV|$SRC"
+    done |
+    sort -n
+)
+
+PRIMARY_IF=""
+BACKUP_IF=""
+
+[ "${#PHYSICAL_DEFAULTS[@]}" -ge 1 ] && \
+PRIMARY_IF="$(echo "${PHYSICAL_DEFAULTS[0]}" | cut -d'|' -f2)"
+
+[ "${#PHYSICAL_DEFAULTS[@]}" -ge 2 ] && \
+BACKUP_IF="$(echo "${PHYSICAL_DEFAULTS[1]}" | cut -d'|' -f2)"
+
+for ITEM in "${PHYSICAL_DEFAULTS[@]}"; do
+    ACTIVE_METRIC=$(echo "$ITEM" | cut -d'|' -f1)
+    DEV=$(echo "$ITEM" | cut -d'|' -f2)
+
+    CONN=$(
+        "$NMCLI" -t -f GENERAL.CONNECTION device show "$DEV" 2>/dev/null |
+        cut -d: -f2-
+    )
+
+    CONFIG_METRIC="-"
+
+    if [ -n "$CONN" ] && [ "$CONN" != "--" ]; then
+        CONFIG_METRIC=$(
+            "$NMCLI" -g ipv4.route-metric connection show "$CONN" 2>/dev/null |
+            head -1
+        )
+
+        [ -z "$CONFIG_METRIC" ] && CONFIG_METRIC="-"
+    fi
+
+    ROLE="OTHER"
+
+    [ "$DEV" = "$PRIMARY_IF" ] && ROLE="PRIMARY"
+    [ "$DEV" = "$BACKUP_IF" ] && ROLE="BACKUP"
+
+    printf "%-10s %-12s %-10s %s\n" \
+        "$DEV" "$CONFIG_METRIC" "$ACTIVE_METRIC" "$ROLE"
+done
+
+echo
+echo "INTERNET"
+
+INET_ROUTE=$(
+    "$IP" route get 1.1.1.1 2>/dev/null |
+    head -1
+)
+
+INET_DEV=$(echo "$INET_ROUTE" |
+    awk '{for(i=1;i<=NF;i++) if($i=="dev"){print $(i+1); exit}}')
+
+INET_SRC=$(echo "$INET_ROUTE" |
+    awk '{for(i=1;i<=NF;i++) if($i=="src"){print $(i+1); exit}}')
+
+if [[ "$INET_DEV" == tun* ]] || [[ "$INET_DEV" == wg* ]]; then
+    echo "VPN       : CONNECTED"
+else
+    echo "VPN       : BYPASS/OFF"
+fi
+
+echo "Route     : ${INET_DEV:--}"
+echo "Source    : ${INET_SRC:--}"
+
+echo
+echo "WIFI"
+
+WIFI_FOUND=0
+
+for IF in $("$IP" -br link | awk '{print $1}'); do
+    [ -d "/sys/class/net/$IF/wireless" ] || continue
+
+    IPV4=$(
+        "$IP" -4 -o addr show "$IF" 2>/dev/null |
+        awk '{print $4; exit}'
+    )
+
+    [ -n "$IPV4" ] || continue
+
+    LINK=$("$IW" dev "$IF" link 2>/dev/null)
+
+    SSID=$(echo "$LINK" |
+        sed -n 's/^[[:space:]]*SSID: //p' |
+        head -1)
+
+    BSSID=$(echo "$LINK" |
+        awk '/Connected to/ {print $3; exit}')
+
+    SIGNAL=$(echo "$LINK" |
+        awk '/signal:/ {print $2" "$3; exit}')
+
+    TXRATE=$(echo "$LINK" |
+        sed -n 's/^[[:space:]]*tx bitrate: //p' |
+        head -1)
+
+    RXRATE=$(echo "$LINK" |
+        sed -n 's/^[[:space:]]*rx bitrate: //p' |
+        head -1)
+
+    FREQ=$(echo "$LINK" |
+        awk '/freq:/ {print $2; exit}')
+
+    [ -z "$SSID" ] && SSID="-"
+    [ -z "$BSSID" ] && BSSID="-"
+    [ -z "$SIGNAL" ] && SIGNAL="-"
+    [ -z "$TXRATE" ] && TXRATE="-"
+    [ -z "$RXRATE" ] && RXRATE="-"
+    [ -z "$FREQ" ] && FREQ="-"
+
+    echo "Interface : $IF"
+    echo "IP        : $IPV4"
+    echo "SSID      : $SSID"
+    echo "BSSID     : $BSSID"
+    echo "Signal    : $SIGNAL"
+    echo "Frequency : $FREQ MHz"
+    echo "TX Rate   : $TXRATE"
+    echo "RX Rate   : $RXRATE"
+
+    WIFI_FOUND=1
+    break
+done
+
+[ "$WIFI_FOUND" -eq 0 ] && echo "No active WiFi interface."
+
+echo
+echo "ETHERNET"
+
+ETH_FOUND=0
+
+for IF in $("$IP" -br link | awk '{print $1}'); do
+    [ "$IF" = "lo" ] && continue
+    [ -d "/sys/class/net/$IF/wireless" ] && continue
+    [[ "$IF" == tun* ]] && continue
+    [[ "$IF" == wg* ]] && continue
+    [ -e "/sys/class/net/$IF/device" ] || continue
+
+    IPV4=$(
+        "$IP" -4 -o addr show "$IF" 2>/dev/null |
+        awk '{print $4; exit}'
+    )
+
+    [ -n "$IPV4" ] || continue
+
+    LINK=$(
+        "$ETHTOOL" "$IF" 2>/dev/null |
+        awk -F': ' '/Link detected:/{print $2}'
+    )
+
+    SPEED=$(
+        "$ETHTOOL" "$IF" 2>/dev/null |
+        awk -F': ' '/Speed:/{print $2}'
+    )
+
+    DUPLEX=$(
+        "$ETHTOOL" "$IF" 2>/dev/null |
+        awk -F': ' '/Duplex:/{print $2}'
+    )
+
+    [ -z "$LINK" ] && LINK="-"
+    [ -z "$SPEED" ] && SPEED="-"
+    [ -z "$DUPLEX" ] && DUPLEX="-"
+
+    echo "Interface : $IF"
+    echo "IP        : $IPV4"
+    echo "Link      : $LINK"
+    echo "Speed     : $SPEED $DUPLEX"
+
+    ETH_FOUND=1
+    break
+done
+
+[ "$ETH_FOUND" -eq 0 ] && echo "No active Ethernet interface."
+
+echo
+echo "LOCAL PATH PAIRS"
+
+mapfile -t ACTIVE < <(
+    "$IP" -4 -o addr show scope global 2>/dev/null |
+    awk '{print $2"|"$4}' |
+    grep -vE '^(tun|wg)'
+)
+
+if [ "${#ACTIVE[@]}" -lt 2 ]; then
+    echo "Not enough active physical interfaces."
+    exit 0
+fi
+
+for ((A=0; A<${#ACTIVE[@]}; A++)); do
+    for ((B=A+1; B<${#ACTIVE[@]}; B++)); do
+
+        IFA="${ACTIVE[$A]%%|*}"
+        IPA="${ACTIVE[$A]#*|}"
+        IPA="${IPA%%/*}"
+
+        IFB="${ACTIVE[$B]%%|*}"
+        IPB="${ACTIVE[$B]#*|}"
+        IPB="${IPB%%/*}"
+
+        RESULT=$(
+            "$IP" route get "$IPB" from "$IPA" 2>/dev/null |
+            head -1
+        )
+
+        if echo "$RESULT" | grep -q ' dev lo '; then
+            STATE="LOCAL SHORTCUT"
+        else
+            STATE="ROUTED"
+        fi
+
+        echo "$IFA $IPA -> $IFB $IPB : $STATE"
+    done
+done

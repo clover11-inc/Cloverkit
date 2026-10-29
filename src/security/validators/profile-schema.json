@@ -1,0 +1,21 @@
+{
+  "schema_version": 1,
+  "required": [
+    "cve",
+    "pattern",
+    "risk",
+    "enabled",
+    "description",
+    "parameters"
+  ],
+  "risk_values": [
+    "SAFE",
+    "ACTIVE",
+    "LAB_ONLY"
+  ],
+  "notes": [
+    "A profile never overrides framework safety limits.",
+    "LAB_ONLY profiles are not executable in normal sec-validate.",
+    "A new CVE profile must be explicitly created before validation."
+  ]
+}

@@ -1,0 +1,21 @@
+#!/usr/bin/python3
+import argparse,sys
+sys.path.insert(0,'/usr/local/lib/bh-interactive')
+from cloverkit_optional_setup import wizard
+p=argparse.ArgumentParser(description='CloverKit optional setup over SSH or serial')
+p.add_argument('feature',choices=('email','vpn','recovery-hotspot','status'))
+a=p.parse_args()
+try:
+    if a.feature=='status':
+        import json
+        from pathlib import Path
+        from cloverkit_optional_setup import private_json,email_settings
+        def enabled(name,key):
+            try:return bool(private_json(Path('/etc/cloverkit')/name).get(key))
+            except (OSError,ValueError):return False
+        print(json.dumps({'email':email_settings() is not None,'vpn':enabled('vpn.json','configured'),'recovery_hotspot':enabled('recovery-hotspot.json','enabled')}))
+    elif a.feature=='recovery-hotspot':
+        from cloverkit_recovery_hotspot import setup
+        setup()
+    else:wizard(a.feature)
+except (OSError,ValueError) as error:raise SystemExit('CloverKit setup: '+str(error))

@@ -1,0 +1,11 @@
+[Unit]
+Description=Blackhat boot payload mount for CloverKit
+RequiresMountsFor=/boot
+After=local-fs.target
+Before=bh-serial-gateway.service cloverkit-target-clean.service
+[Service]
+Type=oneshot
+ExecStart=/bin/mount --bind /boot/bh /mnt
+RemainAfterExit=yes
+[Install]
+WantedBy=multi-user.target

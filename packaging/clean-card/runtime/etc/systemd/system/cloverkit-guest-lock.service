@@ -1,0 +1,11 @@
+[Unit]
+Description=Lock temporary CloverKit SSH accounts at boot
+Before=ssh.service sshd.service
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/passwd -l console
+ExecStart=/usr/bin/passwd -l conwifi
+ExecStart=/usr/bin/passwd -l conveh
+RemainAfterExit=yes
+[Install]
+WantedBy=multi-user.target

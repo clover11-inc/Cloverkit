@@ -1,0 +1,72 @@
+#!/usr/bin/env python3
+import collections,json,os,selectors,subprocess,sys,time,ipaddress,concurrent.futures
+from pathlib import Path
+sys.path.insert(0,'/usr/local/lib/bh-interactive')
+from cloverkit_security_radio import collect_wifi,augment_report
+def emit(value): print(json.dumps(value,separators=(',',':')),flush=True)
+def main():
+    args=[x for x in sys.argv[1:] if x!='--no-wifi']
+    targeted=any(x in ('--host','--target','--network') or x.startswith(('--host=','--target=','--network=')) for x in args)
+    report_path=Path('/mnt/security/reports/latest.json')
+    previous=report_path.read_bytes() if report_path.exists() else None
+    wifi_status={'status':'not requested'};wifi_devices=[]
+    if '--no-wifi' not in sys.argv and not targeted and '--ble-only' not in args:
+        emit(dict(event='progress',stage='Checking nearby Wi-Fi advertisements'))
+        with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
+            future=pool.submit(collect_wifi);waiting=time.monotonic()
+            while not future.done():
+                emit(dict(event='progress',stage='Checking nearby Wi-Fi advertisements',elapsed=int(time.monotonic()-waiting)))
+                time.sleep(1)
+            wifi_status,wifi_devices=future.result()
+    addresses=subprocess.run(['ip','-j','-4','address','show','scope','global'],capture_output=True,text=True)
+    try:
+        ips=[a for row in json.loads(addresses.stdout) for a in row.get('addr_info',[]) if a.get('family')=='inet']
+        private=[ipaddress.ip_network(n) for n in ('10.0.0.0/8','172.16.0.0/12','192.168.0.0/16')]
+        suitable=any(a.get('prefixlen',0)>=24 and any(ipaddress.ip_address(a['local']) in n for n in private) for a in ips)
+    except (ValueError,TypeError,KeyError):ips=[];suitable=False
+    lan_status={'status':'checked'} if targeted or suitable else {'status':'not connected' if not ips else 'not automatically scanned','reason':'LAN is optional; automatic scope is limited to private /24-or-smaller networks.'}
+    if not targeted and not suitable and '--ble-only' not in args:
+        args+=['--ble-only']
+        if '--no-cve' not in args:args+=['--no-cve']
+    emit(dict(event='state',state='Checking BLE and available LAN'))
+    child=subprocess.Popen(['sec-scan','--lcd-progress',*args],stdout=subprocess.PIPE,stderr=subprocess.STDOUT)
+    selector=selectors.DefaultSelector();selector.register(child.stdout,selectors.EVENT_READ)
+    started=time.monotonic();last=started;buffer=b'';tail=collections.deque(maxlen=6)
+    state=dict(event='progress',stage='Starting');active={};recent=collections.deque(maxlen=4)
+    def update():
+        emit(dict(state,elapsed=int(time.monotonic()-started),active=dict(active),recent=list(recent)))
+    try:
+        while selector.get_map():
+            for key,_ in selector.select(timeout=1):
+                chunk=os.read(key.fd,65536)
+                if not chunk: selector.unregister(key.fileobj);continue
+                buffer+=chunk.replace(b'\r',b'\n')
+                while b'\n' in buffer:
+                    line,buffer=buffer.split(b'\n',1);line=line.decode('utf-8','replace').strip()
+                    if line.startswith('SECSCAN_PROGRESS '):
+                        try: event=json.loads(line[17:])
+                        except ValueError: continue
+                        host=event.get('host');stage=event.get('stage')
+                        if stage in ('Checking services','Verifying protocols'): active[host]=stage
+                        elif stage in ('Device checked','Analysis complete for device'):
+                            active.pop(host,None);recent.append(f"{host}: {event.get('findings',0)} findings"+(' · check error' if event.get('error') else ''))
+                        if stage=='Analysing advisories': active[host]=stage
+                        if stage=='Analysing': state.pop('completed',None);state.pop('total',None)
+                        state.update({k:v for k,v in event.items() if k!='host'});update();last=time.monotonic()
+                    elif line: tail.append(line)
+            if child.poll() is None and time.monotonic()-last>=2: update();last=time.monotonic()
+        rc=child.wait()
+        if rc:
+            emit(dict(event='error',message='Security scan failed',details=list(tail)));return rc
+        emit(dict(event='state',state='Preparing report'))
+        if not report_path.exists() or report_path.read_bytes()==previous:
+            emit(dict(event='error',message='No fresh Security report was produced',details=list(tail)));return 2
+        augment_report(report_path,wifi_status,wifi_devices,lan_status)
+        for command in ('/usr/local/bin/secscan-targets','/usr/local/bin/secscan-events'):
+            result=subprocess.run([command])
+            if result.returncode: emit(dict(event='error',message='Report processing failed'));return result.returncode
+        return 0
+    finally:
+        selector.close()
+        if child.poll() is None: child.terminate();child.wait()
+if __name__=='__main__':sys.exit(main())

@@ -1,0 +1,936 @@
+{
+  "baseline": "prior-development-baseline",
+  "sources": [
+    {
+      "source": "/usr/local/lib/bh-interactive/cloverkit_insights.py",
+      "path": "src/panel/cloverkit_insights.py",
+      "original_sha256": "538046d360d0fa168d65817764706fabc03c59ac4644628d8918a0e03ac894d8",
+      "status": "inherited"
+    },
+    {
+      "source": "/usr/local/lib/bh-interactive/cloverkit_network_sections.py",
+      "path": "src/panel/cloverkit_network_sections.py",
+      "original_sha256": "d630b249f1e99b15665abe5bfc471ad4580829b645daca17cb23e5b7fb80e18f",
+      "status": "inherited"
+    },
+    {
+      "source": "/usr/local/lib/bh-interactive/clover_boot_splash.py",
+      "path": "src/panel/clover_boot_splash.py",
+      "original_sha256": "ba373c08b218b698692b481a02b789bf4e25e3d3d64cb5e8d9c716ec58a43416",
+      "status": "inherited"
+    },
+    {
+      "source": "/usr/local/lib/bh-interactive/clover-boot.png",
+      "path": "src/panel/clover-boot.png",
+      "original_sha256": "9bc5857e0422510e015fa3e698cee585f1976261fb49dfcf8b2447c05ce9ae86",
+      "status": "inherited"
+    },
+    {
+      "source": "/usr/local/lib/bh-interactive/cloverkit_radio_menu.py",
+      "path": "src/panel/cloverkit_radio_menu.py",
+      "original_sha256": "632331410065cfbf44c601ced1d1bfc0af563caf5be937c6bb7a6a1e8be2c486",
+      "status": "inherited"
+    },
+    {
+      "source": "/usr/local/lib/bh-interactive/wifi_health_view.py",
+      "path": "src/panel/wifi_health_view.py",
+      "original_sha256": "86ab8b0f9376e16517764c3aec78448d59d64f7a8f359ddc33d69c52c7878921",
+      "status": "inherited"
+    },
+    {
+      "source": "/usr/local/lib/bh-interactive/wifi_peer.py",
+      "path": "src/panel/wifi_peer.py",
+      "original_sha256": "9e8f0db57dab91a27a297a0b64011dac0d9efa048b9eac56e96ec9248ad74f07",
+      "status": "inherited"
+    },
+    {
+      "source": "/usr/local/lib/bh-interactive/wifi_health_presentation.py",
+      "path": "src/panel/wifi_health_presentation.py",
+      "original_sha256": "9d62cebaf154a74f38e0f90fd1c4e0f5f6677899aa0ea5bcc9cee5af8d789945",
+      "status": "inherited"
+    },
+    {
+      "source": "/usr/local/lib/bh-interactive/clover_game_session.py",
+      "path": "src/panel/clover_game_session.py",
+      "original_sha256": "2a03a8b6ac78040f1146870aaf56e96ad5ed991f332179c3c55fcb35838f90de",
+      "status": "inherited"
+    },
+    {
+      "source": "/usr/local/lib/bh-interactive/clover_lcd_panel.py",
+      "path": "src/panel/clover_lcd_panel.py",
+      "original_sha256": "5cc6c5393eec223fdfdf683f0b6e7fc9313165b2b1b1fe780a625ea7cfcceb0d",
+      "status": "inherited"
+    },
+    {
+      "source": "/usr/local/lib/bh-interactive/cloverkit_wifi_waterfall.py",
+      "path": "src/panel/cloverkit_wifi_waterfall.py",
+      "original_sha256": "8603d7157f078525e91cde5268abc3952ac5a05e77521d15c1644044d02b9a48",
+      "status": "inherited"
+    },
+    {
+      "source": "/usr/local/lib/bh-interactive/wifi_health_browser.py",
+      "path": "src/panel/wifi_health_browser.py",
+      "original_sha256": "67ba619c28d95642cd720aeccb49d9ec7de5d1ccb21f764623539730cc8ee71d",
+      "status": "inherited"
+    },
+    {
+      "source": "/usr/local/lib/bh-interactive/bh_panel.py",
+      "path": "src/panel/bh_panel.py",
+      "original_sha256": "79144c519bbbc9a59521154de7e34b94d8c01ff281dc1aa25758c44b908f5bc6",
+      "status": "inherited"
+    },
+    {
+      "source": "/usr/local/lib/bh-interactive/cloverkit_radio_recovery.py",
+      "path": "src/panel/cloverkit_radio_recovery.py",
+      "original_sha256": "33e2ba174732a117343e5429ba373eca426e52eacd00fe9e674b9b48144380ad",
+      "status": "inherited"
+    },
+    {
+      "source": "/usr/local/lib/bh-interactive/device_identity.py",
+      "path": "src/panel/device_identity.py",
+      "original_sha256": "ba10e08939fed79468c7262af6bd3656bebc4be7ba7ec98b6774979d25e98428",
+      "status": "inherited"
+    },
+    {
+      "source": "/usr/local/lib/bh-interactive/cloverkit_device_history.py",
+      "path": "src/panel/cloverkit_device_history.py",
+      "original_sha256": "183d376e667e51831ce88ab398c0b64d09154ba1cc57c570189cd3fa42cc7878",
+      "status": "inherited"
+    },
+    {
+      "source": "/usr/local/lib/bh-interactive/cloverkit_report.py",
+      "path": "src/panel/cloverkit_report.py",
+      "original_sha256": "492c0215de71f51ae2781646701e3c3e8bf1e805b74b660fd875c39395608e85",
+      "status": "inherited"
+    },
+    {
+      "source": "/usr/local/lib/bh-interactive/cloverkit_wireless.py",
+      "path": "src/panel/cloverkit_wireless.py",
+      "original_sha256": "dc85795c1481e1b054b713d2a34bfdae1070b7ba15b1b21359702a571193d6d3",
+      "status": "inherited"
+    },
+    {
+      "source": "/usr/local/lib/bh-interactive/wifi_console_menu.py",
+      "path": "src/panel/wifi_console_menu.py",
+      "original_sha256": "d0daa972766d012bc1d28a2d4cbb7b85e3e0672db3be92f19d06c1c38288e514",
+      "status": "inherited"
+    },
+    {
+      "source": "/usr/local/lib/bh-interactive/cloverkit_panel_features.py",
+      "path": "src/panel/cloverkit_panel_features.py",
+      "original_sha256": "f32eb7fdc0d375be72790bbe5b09c457767e55fc2cdee46a16f1f4be0d40fc87",
+      "status": "inherited"
+    },
+    {
+      "source": "/usr/local/lib/bh-interactive/direct_ethernet_view.py",
+      "path": "src/panel/direct_ethernet_view.py",
+      "original_sha256": "b63feb2237da5c75666707350402205547b17722c7fa2273a8b74b502218fc76",
+      "status": "inherited"
+    },
+    {
+      "source": "/usr/local/lib/bh-interactive/console_traffic.py",
+      "path": "src/panel/console_traffic.py",
+      "original_sha256": "1721b61b536dbe618728387e17048b5911026b3cf4c1c81717ca810e0cd8027d",
+      "status": "inherited"
+    },
+    {
+      "source": "/usr/local/lib/bh-interactive/shared_console.py",
+      "path": "src/panel/shared_console.py",
+      "original_sha256": "b6961ea1dbb24266f64839f559886eafc0fd32dd04984b4d60f2c357f4218397",
+      "status": "inherited"
+    },
+    {
+      "source": "/usr/local/lib/bh-interactive/wifi_health_engineer.py",
+      "path": "src/panel/wifi_health_engineer.py",
+      "original_sha256": "2968f67622f012aad2705fd76dcf09932007711272fe3de50e0a0972aed8dbe7",
+      "status": "inherited"
+    },
+    {
+      "source": "/usr/local/lib/bh-interactive/cloverkit_direct_neighbors.py",
+      "path": "src/panel/cloverkit_direct_neighbors.py",
+      "original_sha256": "9a659d38df4ca19114e1860303aa01b8b4a17bf2ee92c4db6f72455cbd5b9523",
+      "status": "inherited"
+    },
+    {
+      "source": "/usr/local/lib/bh-interactive/cloverkit_radio_identity.py",
+      "path": "src/panel/cloverkit_radio_identity.py",
+      "original_sha256": "ea600930a90d3ceac20e035c549245633e2e6e4e5ca16e24bccb0aeac5550ffc",
+      "status": "inherited"
+    },
+    {
+      "source": "/usr/local/lib/bh-interactive/clover_compact_pages.py",
+      "path": "src/panel/clover_compact_pages.py",
+      "original_sha256": "bf5241e029d3da0153cd045c3663cf8ab038993efddc3bf770b7ec0c2432cc08",
+      "status": "inherited"
+    },
+    {
+      "source": "/usr/local/lib/bh-interactive/probe_reader.py",
+      "path": "src/panel/probe_reader.py",
+      "original_sha256": "720fdda3197bc39a196bc771408355e1d748297622ae195ef82e19c7a35e802e",
+      "status": "inherited"
+    },
+    {
+      "source": "/usr/local/lib/bh-interactive/console_password.py",
+      "path": "src/panel/console_password.py",
+      "original_sha256": "00cc90ef1209f5910a56ab74532cb8a619186f63477a324017f26ff294489227",
+      "status": "inherited"
+    },
+    {
+      "source": "/usr/local/lib/bh-interactive/conwifi_report.py",
+      "path": "src/panel/conwifi_report.py",
+      "original_sha256": "bc5ec65f0b76605ac2d45c461fdc9d7e6b1b5162faaaf9db62b7584a57165cb6",
+      "status": "inherited"
+    },
+    {
+      "source": "/usr/local/lib/bh-interactive/identity-fields.json",
+      "path": "src/panel/identity-fields.json",
+      "original_sha256": "807476292502550dd17377bc7b353b63d49c9017f65f77e60cef6b00d628bf34",
+      "status": "inherited"
+    },
+    {
+      "source": "/mnt/scripts/device-watch.sh",
+      "path": "src/launchers/device-watch.sh",
+      "original_sha256": "da7dc230ff8f0b011af8f38066019bb8e0224b157e162b6619c9d5a0f03c06ca",
+      "status": "inherited"
+    },
+    {
+      "source": "/mnt/scripts/wifi.sh",
+      "path": "src/launchers/wifi.sh",
+      "original_sha256": "94cecf8f7bc37cf8e3093ce95511f7abd35528cdc8f8e81fcc0448bc33f6f016",
+      "status": "inherited"
+    },
+    {
+      "source": "/mnt/scripts/packet-ndp.sh",
+      "path": "src/launchers/packet-ndp.sh",
+      "original_sha256": "87c10341f095da094a5624e266ed7621f97ca44590b88669f9f44fff37bf73e0",
+      "status": "inherited"
+    },
+    {
+      "source": "/mnt/scripts/serial.sh",
+      "path": "src/launchers/serial.sh",
+      "original_sha256": "b73fa0d092c56e07d4a73a4954bb2891cd830fe7da9aae4a771367e8ba595919",
+      "status": "inherited"
+    },
+    {
+      "source": "/mnt/scripts/wifi-health.sh",
+      "path": "src/launchers/wifi-health.sh",
+      "original_sha256": "b0014cb2516834969002553ccc9301b034c1949a88c920939f36b60a701eec8f",
+      "status": "inherited"
+    },
+    {
+      "source": "/mnt/scripts/packet-raw.sh",
+      "path": "src/launchers/packet-raw.sh",
+      "original_sha256": "609dda53fb9a8d5abd268a2eaf9d1815f1e8d8bd76e6cabb7d7f69de3c46b42b",
+      "status": "inherited"
+    },
+    {
+      "source": "/mnt/scripts/monitor.sh",
+      "path": "src/launchers/monitor.sh",
+      "original_sha256": "3b11ce56d02509a96f4664c641940d93212e3fe4d5243ec5ad0f1c3987120506",
+      "status": "inherited"
+    },
+    {
+      "source": "/mnt/scripts/hosts.sh",
+      "path": "src/launchers/hosts.sh",
+      "original_sha256": "0251fe6cde06743b5a7f3e4bfddbd8c2543a7e2cc2a90b34ba680116c48852ad",
+      "status": "inherited"
+    },
+    {
+      "source": "/mnt/scripts/ethernet.sh",
+      "path": "src/launchers/ethernet.sh",
+      "original_sha256": "7c678ef03173d8ee30622922a01ef4a20e49279695c30fa37bc57a0a80a55d62",
+      "status": "inherited"
+    },
+    {
+      "source": "/mnt/scripts/path-test.sh",
+      "path": "src/launchers/path-test.sh",
+      "original_sha256": "d2ed64328585151103deac8c7c8fd686adf3d0c056edafa0ea628a394dd92170",
+      "status": "inherited"
+    },
+    {
+      "source": "/mnt/scripts/net-direct-test.sh",
+      "path": "src/launchers/net-direct-test.sh",
+      "original_sha256": "5bca6299a81e8adf9f175e738d427ffbedf093aeb8064afcaa49aa2f65de0c3f",
+      "status": "inherited"
+    },
+    {
+      "source": "/mnt/scripts/iperf-toggle.sh",
+      "path": "src/launchers/iperf-toggle.sh",
+      "original_sha256": "5a784ed1d7dc5cb1584c95bc7740703fb9b00587870f0f245af865eeba4b62c2",
+      "status": "inherited"
+    },
+    {
+      "source": "/mnt/scripts/net-direct-passive.sh",
+      "path": "src/launchers/net-direct-passive.sh",
+      "original_sha256": "e776f513d2c681a3928526fb24ff23869dc92e422348b474361cc74bbc027e57",
+      "status": "inherited"
+    },
+    {
+      "source": "/mnt/scripts/system.sh",
+      "path": "src/launchers/system.sh",
+      "original_sha256": "6f57840dd525ba2fda4d16ea3d2cceeabedf001cab748548b5e600253c23d3f2",
+      "status": "inherited"
+    },
+    {
+      "source": "/mnt/scripts/packet-insights.sh",
+      "path": "src/launchers/packet-insights.sh",
+      "original_sha256": "6c88980513cd009e8a559074c0e2d92241b387865d157bca5cc99e8b8b33d9a2",
+      "status": "inherited"
+    },
+    {
+      "source": "/mnt/scripts/net-direct-static.sh",
+      "path": "src/launchers/net-direct-static.sh",
+      "original_sha256": "9521b1e3bf5b55c2b6d6da5a9a911cb180669bcea350c01b796e1d390e511e3f",
+      "status": "inherited"
+    },
+    {
+      "source": "/mnt/scripts/net-topology.sh",
+      "path": "src/launchers/net-topology.sh",
+      "original_sha256": "7a68ea34092e5f5ffa82ffbcc559dd9a96784327d60cf4463505442e38e7a188",
+      "status": "inherited"
+    },
+    {
+      "source": "/mnt/scripts/device-history.sh",
+      "path": "src/launchers/device-history.sh",
+      "original_sha256": "fba97a3a1dc90dd1d6e0fea0ddeffe19277c4bdc9c6a4aa6e0e07775b4c40be5",
+      "status": "inherited"
+    },
+    {
+      "source": "/mnt/scripts/wifi-client-health.sh",
+      "path": "src/launchers/wifi-client-health.sh",
+      "original_sha256": "fdd97140ef2110c9d9ba6d81971ae419e1fbbd957f8099cb5b7f2511d3487192",
+      "status": "inherited"
+    },
+    {
+      "source": "/mnt/scripts/wifi-waterfall.sh",
+      "path": "src/launchers/wifi-waterfall.sh",
+      "original_sha256": "1b490ab9d120d75e402502764f9f42fd04879dd7bd85988da8fa1f76198b2a88",
+      "status": "inherited"
+    },
+    {
+      "source": "/mnt/scripts/display-mode.sh",
+      "path": "src/launchers/display-mode.sh",
+      "original_sha256": "584f261d5f3a7f1166b5bfcc48b6e2878de658f3880e0f9fc7a627939d4e2fd4",
+      "status": "inherited"
+    },
+    {
+      "source": "/mnt/scripts/packet-scan.sh",
+      "path": "src/launchers/packet-scan.sh",
+      "original_sha256": "dd96a700e2b9df8eb691f5ff47d68c59ca8208e6f62fd026f8161d015dc800a6",
+      "status": "inherited"
+    },
+    {
+      "source": "/mnt/scripts/packet-beacon.sh",
+      "path": "src/launchers/packet-beacon.sh",
+      "original_sha256": "b494579f57790b2886b14ff2ca4f6a959c8f1c8dac2af66859b8e278ece0c7b5",
+      "status": "inherited"
+    },
+    {
+      "source": "/mnt/scripts/packet-general.sh",
+      "path": "src/launchers/packet-general.sh",
+      "original_sha256": "b1dca71de7d54fb4571d0c619486c054cae4efa13a5b18d072ef1a5f44a355c0",
+      "status": "inherited"
+    },
+    {
+      "source": "/mnt/scripts/packet-probes.sh",
+      "path": "src/launchers/packet-probes.sh",
+      "original_sha256": "4f9b705ced4da77f90932a1410624efcbada9bc8c285a9d113b1d93d0a40f187",
+      "status": "inherited"
+    },
+    {
+      "source": "/mnt/scripts/packet-deauth.sh",
+      "path": "src/launchers/packet-deauth.sh",
+      "original_sha256": "f655c9f0a16b6419743fc1ee51a47f12760d53f6260f8fa0681d7a0fcda7a9c8",
+      "status": "inherited"
+    },
+    {
+      "source": "/mnt/scripts/packet-eapol.sh",
+      "path": "src/launchers/packet-eapol.sh",
+      "original_sha256": "6cc9c3040624c63174708218227203d821d04c2a3b9c75062fa4395cf5c0b332",
+      "status": "inherited"
+    },
+    {
+      "source": "/mnt/scripts/packet-stations.sh",
+      "path": "src/launchers/packet-stations.sh",
+      "original_sha256": "5ae3bbb534020c9be14974b3440191bd41a8a68044e8b066c8c2b1ff06eeaa77",
+      "status": "inherited"
+    },
+    {
+      "source": "/mnt/scripts/target-clean.sh",
+      "path": "src/launchers/target-clean.sh",
+      "original_sha256": "527f1fae8abec1da808d3a43c92f1e9889616857cb329a937926c69654aade26",
+      "status": "inherited"
+    },
+    {
+      "source": "/mnt/scripts/security-scan.sh",
+      "path": "src/launchers/security-scan.sh",
+      "original_sha256": "b846de96c05d9f8e7f25fa6627f41492d4bab38198505f9549713fa0b65025c1",
+      "status": "inherited"
+    },
+    {
+      "source": "/usr/local/bin/bh-panel",
+      "path": "src/commands/bh-panel",
+      "original_sha256": "b4891c2778eaa695876fa34a3708f847e1c05b0e4a8eba0c463f51316dfd01fb",
+      "status": "inherited"
+    },
+    {
+      "source": "/usr/local/bin/bh-screen",
+      "path": "src/commands/bh-screen",
+      "original_sha256": "948f39ea270a16b684d754caea2f3335e1adcf09c9d18b5912362a13af187cab",
+      "status": "inherited"
+    },
+    {
+      "source": "/usr/local/bin/bh-serial-gateway",
+      "path": "src/commands/bh-serial-gateway",
+      "original_sha256": "a6e0beca076bef72ec0e0dc22a8d4d949e084056859b9de5c921a2c150669b95",
+      "status": "inherited"
+    },
+    {
+      "source": "/usr/local/bin/bh-flipper-job",
+      "path": "src/commands/bh-flipper-job",
+      "original_sha256": "b6747801ded0fb7391040c8c9755deb010b5dd75442e75349e5da14e41706405",
+      "status": "inherited"
+    },
+    {
+      "source": "/usr/local/bin/lcd-run",
+      "path": "src/commands/lcd-run",
+      "original_sha256": "4e32c369670d3e3b587172e0fcf04ec5b8def584a91faf76b94af81948feecb6",
+      "status": "inherited"
+    },
+    {
+      "source": "/usr/local/bin/lcd-mode",
+      "path": "src/commands/lcd-mode",
+      "original_sha256": "9ead1f2b4350fd7efa09a87f934a7a4614fad51715811bd1497bd395ae03f5f3",
+      "status": "inherited"
+    },
+    {
+      "source": "/usr/local/bin/lcd-display-owner",
+      "path": "src/commands/lcd-display-owner",
+      "original_sha256": "a18cb7997cee5f455571f02de0462c3742e1c955f32795cf0d1e3c835fe260be",
+      "status": "inherited"
+    },
+    {
+      "source": "/usr/local/bin/wifi-scan",
+      "path": "src/commands/wifi-scan",
+      "original_sha256": "0de714340b0a5e27aa7864388b16b184a21f9050821e55a453fc7eddd455c2e9",
+      "status": "inherited"
+    },
+    {
+      "source": "/usr/local/bin/wifi-apnames",
+      "path": "src/commands/wifi-apnames",
+      "original_sha256": "98a971b4063585f71ade7155efd091cf65e3e993fb8cc54b64e495242fb08e24",
+      "status": "inherited"
+    },
+    {
+      "source": "/usr/local/bin/target-build-wifi",
+      "path": "src/commands/target-build-wifi",
+      "original_sha256": "876cd9f0a88153aea1047064fa945f0f2e8bdbbd6ce39b09084839fa06ad3246",
+      "status": "inherited"
+    },
+    {
+      "source": "/usr/local/bin/target-clean",
+      "path": "src/commands/target-clean",
+      "original_sha256": "e6040dd8a4e43263959e825cae100b0a53b7e06491a45dda5ccb7deba75a966d",
+      "status": "inherited"
+    },
+    {
+      "source": "/usr/local/bin/wifi-passive-health",
+      "path": "src/commands/wifi-passive-health",
+      "original_sha256": "b84ebd28ce6ab42d1674ea58e19f8d37e74013a3119bec04f6284b9580007135",
+      "status": "inherited"
+    },
+    {
+      "source": "/usr/local/bin/wifi-passive-health-panel",
+      "path": "src/commands/wifi-passive-health-panel",
+      "original_sha256": "157ad8ac48d06dc706578b6101a2d571966196dca8d42f5a0ac599fee16dd81c",
+      "status": "inherited"
+    },
+    {
+      "source": "/usr/local/bin/wifi-waterfall",
+      "path": "src/commands/wifi-waterfall",
+      "original_sha256": "3b610e8de506ea0fcf15a40ff2fb89c685d1710b43b6bf1ba15cccc7361c19eb",
+      "status": "inherited"
+    },
+    {
+      "source": "/usr/local/bin/wifi-waterfall-capture",
+      "path": "src/commands/wifi-waterfall-capture",
+      "original_sha256": "9a40021131148a30b505e79dfcfae31fcba8230cdc904a6381f5e09ca870f10d",
+      "status": "inherited"
+    },
+    {
+      "source": "/usr/local/bin/wifi-health",
+      "path": "src/commands/wifi-health",
+      "original_sha256": "41ddc38c8b4df76170e0ce20dd5c112df80ab9ea6d9ae6d718e262d18530c081",
+      "status": "inherited"
+    },
+    {
+      "source": "/usr/local/bin/wifi-health-connected",
+      "path": "src/commands/wifi-health-connected",
+      "original_sha256": "af57baadc34c361ceb4cbae5a81f45768b1c51ac4cf330b203c341606ae6eb34",
+      "status": "inherited"
+    },
+    {
+      "source": "/usr/local/bin/device-watch",
+      "path": "src/commands/device-watch",
+      "original_sha256": "cdd724e6da1ac0060b979fdd0aa399f95f5e989bef4349e54bb32ffec9bb546c",
+      "status": "inherited"
+    },
+    {
+      "source": "/usr/local/bin/device-track",
+      "path": "src/commands/device-track",
+      "original_sha256": "9df009601593a0c536a938a39250e0b342c19068cdd7f5def626757364e04b58",
+      "status": "inherited"
+    },
+    {
+      "source": "/usr/local/bin/ethernet-live",
+      "path": "src/commands/ethernet-live",
+      "original_sha256": "590970e7a4e28cc71cdd39870730a131c430f8e7a008a47a964ca570fd0ec4c3",
+      "status": "inherited"
+    },
+    {
+      "source": "/usr/local/bin/eth-info",
+      "path": "src/commands/eth-info",
+      "original_sha256": "d3407f7ad475994857e6cf49d82f8f763775b522af880188c1ff0b5061544ac8",
+      "status": "inherited"
+    },
+    {
+      "source": "/usr/local/bin/ethernet-l2-capture",
+      "path": "src/commands/ethernet-l2-capture",
+      "original_sha256": "b114461fa0c9bc2a8a1bcc5d6deaee0e523ad2ff2d8125402204fdd897da9cf1",
+      "status": "inherited"
+    },
+    {
+      "source": "/usr/local/bin/ethernet-neighbor-capture",
+      "path": "src/commands/ethernet-neighbor-capture",
+      "original_sha256": "225584b7062084c16dad4924cf94b1024a05464b707a0dca55a3f86bfaa18854",
+      "status": "inherited"
+    },
+    {
+      "source": "/usr/local/bin/clover-direct-ethernet",
+      "path": "src/commands/clover-direct-ethernet",
+      "original_sha256": "2d6fe8642ad8152c4526ef05225d0c55887ab70128bf53ff94ce7be6a9eaa27c",
+      "status": "inherited"
+    },
+    {
+      "source": "/usr/local/bin/cloverkit-radio-reset",
+      "path": "src/commands/cloverkit-radio-reset",
+      "original_sha256": "acedc2c6ed17b81ff93bd4011bfa8b2d7d272064bc358a69153833cfd1b5a9c3",
+      "status": "inherited"
+    },
+    {
+      "source": "/usr/local/bin/cloverkit-name-radios",
+      "path": "src/commands/cloverkit-name-radios",
+      "original_sha256": "5fe668fa3c911ac38a8d7694859b5a16bde90480cb84220e6abe42464cc3c0be",
+      "status": "inherited"
+    },
+    {
+      "source": "/usr/local/bin/sec-scan",
+      "path": "src/commands/sec-scan",
+      "original_sha256": "64f69ab80bbe0eb3c3ee8d83a943b3edc5f272d8c147b98a4ffa1e5585636f3d",
+      "status": "inherited"
+    },
+    {
+      "source": "/usr/local/bin/sec-last",
+      "path": "src/commands/sec-last",
+      "original_sha256": "454c5ee9b6f291df23011d9a23ed8a6e4aa2e311f744f4143121a305cbc4b905",
+      "status": "inherited"
+    },
+    {
+      "source": "/usr/local/bin/sec-detail",
+      "path": "src/commands/sec-detail",
+      "original_sha256": "3dc1c23e0283ca6368077de6282ab16b87dceb7716ac8b940a0e768ce093e5dc",
+      "status": "inherited"
+    },
+    {
+      "source": "/usr/local/bin/secscan-events",
+      "path": "src/commands/secscan-events",
+      "original_sha256": "3bd2dec68b181906193220abcaf220b858844784a64c5714f106f865212c4480",
+      "status": "inherited"
+    },
+    {
+      "source": "/usr/local/bin/secscan-lcd-run",
+      "path": "src/commands/secscan-lcd-run",
+      "original_sha256": "1f560442f5f551b47f8b4e689e493ad30118c2856fe820f9cd90e66e39209618",
+      "status": "inherited"
+    },
+    {
+      "source": "/usr/local/bin/secscan-targets",
+      "path": "src/commands/secscan-targets",
+      "original_sha256": "88756df0640d2c7cc324aa47649ee1aee3f438f73e503efe8760f96da11e5bbb",
+      "status": "inherited"
+    },
+    {
+      "source": "/usr/local/bin/security-status",
+      "path": "src/commands/security-status",
+      "original_sha256": "75fd2fe8a4f8c5b3da6fa21ab1ff5356c715a99ecd32c6431c9e463156e59ac1",
+      "status": "inherited"
+    },
+    {
+      "source": "/usr/local/bin/sec-update",
+      "path": "src/commands/sec-update",
+      "original_sha256": "fe2ec0164b0f8dd49471ed214b0d43b000a73c554ea58ff169d3028bdb5f5bfc",
+      "status": "inherited"
+    },
+    {
+      "source": "/usr/local/bin/sec-ble-list",
+      "path": "src/commands/sec-ble-list",
+      "original_sha256": "2980deabd24b120d61b8d0ea453d69d9ca997ff9a443efb0268545136721dd2f",
+      "status": "inherited"
+    },
+    {
+      "source": "/usr/local/bin/sec-ble-authorize",
+      "path": "src/commands/sec-ble-authorize",
+      "original_sha256": "baaef2884caa56752e0f0e18d6978d842b76cb490155010c5ff888cc1b6cc0fe",
+      "status": "inherited"
+    },
+    {
+      "source": "/usr/local/bin/sec-ble-remove",
+      "path": "src/commands/sec-ble-remove",
+      "original_sha256": "75260f760ddbc9b9274873878e49f9a98e659b537c0f28c6f7dc340b05ba14eb",
+      "status": "inherited"
+    },
+    {
+      "source": "/usr/local/bin/hosts",
+      "path": "src/commands/hosts",
+      "original_sha256": "37888847f0ea2d7fe401e2cc4cad5f85df58a9d50318e3e93618769759fd002b",
+      "status": "inherited"
+    },
+    {
+      "source": "/usr/local/bin/host-profile",
+      "path": "src/commands/host-profile",
+      "original_sha256": "2a426f00f5677a08846b8fadc9c848f1fce65fbd310ce65f1298fad9ca71fcaf",
+      "status": "inherited"
+    },
+    {
+      "source": "/usr/local/bin/wifi-monitor",
+      "path": "src/commands/wifi-monitor",
+      "original_sha256": "72eab5b42192832fb48fee6c7c93607985739d764fd3fb5f3c40416ba5978a17",
+      "status": "inherited"
+    },
+    {
+      "source": "/usr/local/bin/packet-live",
+      "path": "src/commands/packet-live",
+      "original_sha256": "5c8a18b5762c5cc123c4d54168de26b2be008730f37fa5c9b3a9a58e423e31ee",
+      "status": "inherited"
+    },
+    {
+      "source": "/usr/local/bin/packet-general-live",
+      "path": "src/commands/packet-general-live",
+      "original_sha256": "c383283ecb411bb7db1abcaf9ea6aa37f4f91900d1f7db3ac5c4d18684cb2e90",
+      "status": "inherited"
+    },
+    {
+      "source": "/usr/local/bin/packet-scan",
+      "path": "src/commands/packet-scan",
+      "original_sha256": "2c0662f56a7140bce9e0ea91603b34f20d158b5e8316198b005dd9aa040b4870",
+      "status": "quarantined-broken"
+    },
+    {
+      "source": "/usr/local/bin/packet-raw-clean",
+      "path": "src/commands/packet-raw-clean",
+      "original_sha256": "d9f621842f14b655042eb5869ebd39f82be99915410b903a4412f57188d0cc3b",
+      "status": "inherited"
+    },
+    {
+      "source": "/usr/local/bin/ap-find-compact",
+      "path": "src/commands/ap-find-compact",
+      "original_sha256": "9a686c8f955757c7bb96a860f423c5d0d7c1ea854bbfe4ca2c77baa8f2795d55",
+      "status": "inherited"
+    },
+    {
+      "source": "/usr/local/bin/ap-find-group",
+      "path": "src/commands/ap-find-group",
+      "original_sha256": "e837a57bd667e20a02e070a89cde58a087fec4be0bcb99d8425ea59ac8e5d6d3",
+      "status": "inherited"
+    },
+    {
+      "source": "/usr/local/bin/cloverkit-report",
+      "path": "src/commands/cloverkit-report",
+      "original_sha256": "f029438daf38bb04cf36b94c127d06e9866108b6118ff6871cc52c2da7d2d4f9",
+      "status": "inherited"
+    },
+    {
+      "source": "/usr/local/bin/cloverkit-survey-store",
+      "path": "src/commands/cloverkit-survey-store",
+      "original_sha256": "b593a3cc5ce8218ef4a603e9cbd058d7521bed5cee8bf52b34452033a3db97c7",
+      "status": "inherited"
+    },
+    {
+      "source": "/usr/local/bin/cloverkit-packet-insights",
+      "path": "src/commands/cloverkit-packet-insights",
+      "original_sha256": "199eae5a98341e0bc407089e70ad5bcdf2302044dcff0a5deab19cf1576ec711",
+      "status": "inherited"
+    },
+    {
+      "source": "/usr/local/bin/iperf-server",
+      "path": "src/commands/iperf-server",
+      "original_sha256": "5c2c1f70a88d9b042f81b6b60d766ff5736d7ade6c7112526b50d4295d6b1dde",
+      "status": "inherited"
+    },
+    {
+      "source": "/usr/local/bin/iperf-client",
+      "path": "src/commands/iperf-client",
+      "original_sha256": "497c005af7253aadbd395510ced6cfef9a07350c15c6b3c7c25f21293687d9cb",
+      "status": "inherited"
+    },
+    {
+      "source": "/usr/local/bin/iperf-select-if",
+      "path": "src/commands/iperf-select-if",
+      "original_sha256": "4e9da0b0cae36e88385ec5dff2c4535fd50600f88dc6b5cb3361f42b415723a4",
+      "status": "inherited"
+    },
+    {
+      "source": "/usr/local/bin/path-test",
+      "path": "src/commands/path-test",
+      "original_sha256": "bcbbd1254fc9aeefe2634e261c3869100b54ef35e50996d979e4744190ac0b2f",
+      "status": "inherited"
+    },
+    {
+      "source": "/usr/local/bin/route-check",
+      "path": "src/commands/route-check",
+      "original_sha256": "303f00a3de559b37148e249e8d83d9303ad0e510ce6629e4795d6030552c383d",
+      "status": "inherited"
+    },
+    {
+      "source": "/usr/local/bin/usb-scan",
+      "path": "src/commands/usb-scan",
+      "original_sha256": "9659e796c62abeb6f273ddc58381057d6c69caa04e5fcb4d3a934ed0770bf3e2",
+      "status": "inherited"
+    },
+    {
+      "source": "/usr/local/bin/console",
+      "path": "src/commands/console",
+      "original_sha256": "b9381f8714b4a10d6f656163085705d200e779443d86d635f4e7bdd9365a52b0",
+      "status": "inherited"
+    },
+    {
+      "source": "/usr/local/bin/system",
+      "path": "src/commands/system",
+      "original_sha256": "7d9f22c67baa7168665d558f9846e411eac57adf610ecfb31c33d4e34b1204d0",
+      "status": "inherited"
+    },
+    {
+      "source": "/mnt/security/secscan.py",
+      "path": "src/security/secscan.py",
+      "original_sha256": "cd98feebc056bec2364423d81969d3d5dad076443b7977729a8fb4ddbc84982a",
+      "status": "inherited"
+    },
+    {
+      "source": "/mnt/security/secvalidate.py",
+      "path": "src/security/secvalidate.py",
+      "original_sha256": "970c71860902701753a040a9f0d36e6248838e3a28879f369bd5d7768e328366",
+      "status": "inherited"
+    },
+    {
+      "source": "/mnt/security/validators/registry.json",
+      "path": "src/security/validators/registry.json",
+      "original_sha256": "ca3d163bab055381827226140568f3bef7eaac187cebd76878e0b63e9e442356",
+      "status": "inherited"
+    },
+    {
+      "source": "/mnt/security/validators/patterns.json",
+      "path": "src/security/validators/patterns.json",
+      "original_sha256": "06b2093febc0a47be756ed23443840631a208d8c19532e11759b7f7488b036bc",
+      "status": "inherited"
+    },
+    {
+      "source": "/mnt/security/validators/profile-schema.json",
+      "path": "src/security/validators/profile-schema.json",
+      "original_sha256": "3db959d8270a1f46915d36bbbb0cb4f5b7e013474b7398af6eafc17aac74adb9",
+      "status": "inherited"
+    },
+    {
+      "source": "/mnt/security/validators/profiles/EXAMPLE.json",
+      "path": "src/security/validators/profiles/EXAMPLE.json",
+      "original_sha256": "542211676d4fcf3c49a24dd8c9cc174165661934c20566e181d16b6345d1007e",
+      "status": "inherited"
+    },
+    {
+      "source": "/etc/systemd/system/cloverkit-target-clean.service",
+      "path": "packaging/systemd/cloverkit-target-clean.service",
+      "original_sha256": "3c401cc3fcddf8cff68763e8335a2f232c179c1db4a8d9326adf9175469beb9e",
+      "status": "inherited"
+    },
+    {
+      "source": "/etc/systemd/system/cloverkit-boot-splash.service",
+      "path": "packaging/systemd/cloverkit-boot-splash.service",
+      "original_sha256": "199c52bedcaa01ed14ca87fea2bc26f4abdac6ff33083b6a6ffe6acee5e25440",
+      "status": "inherited"
+    },
+    {
+      "source": "/etc/systemd/system/cloverkit-radio-names.service",
+      "path": "packaging/systemd/cloverkit-radio-names.service",
+      "original_sha256": "c074b8db4248668a5615be19a3f0f8b7b4c1b604f75d878aa5cf8fb35404a915",
+      "status": "inherited"
+    },
+    {
+      "source": "/etc/systemd/system/cloverkit-serial.service",
+      "path": "packaging/systemd/cloverkit-serial.service",
+      "original_sha256": "339b0de3c8b1bd56472edddf52e336e9d066cf34690173dd81f7f3b49a819378",
+      "status": "inherited"
+    },
+    {
+      "source": "/etc/systemd/system/bh-serial-gateway.service",
+      "path": "packaging/systemd/bh-serial-gateway.service",
+      "original_sha256": "a18ad19dd2b0ed0bbf42f296a8cdc15783892bbeab6e18d8fe5060e3c77a3817",
+      "status": "inherited"
+    },
+    {
+      "source": "upstream-or-development-source/LICENSE",
+      "path": "LICENSES/BlackhatOS-MIT.txt",
+      "original_sha256": "ef0a8f23508eabc955cead35506387751a8526a5e4ac9c30321878f6b5892aa8",
+      "status": "inherited"
+    },
+    {
+      "source": "/usr/local/bin/bh-wifi-peer",
+      "path": "src/commands/bh-wifi-peer",
+      "original_sha256": "c50c0e328b5411413a24f5dc9bca8736a0075fbaf1bec756a09169ab5f8b6a2a",
+      "status": "inherited"
+    },
+    {
+      "source": "/usr/local/bin/wifi-health-ap-map",
+      "path": "src/commands/wifi-health-ap-map",
+      "original_sha256": "7ad83b0ba4a79f1cdcdd1ab80f3cc614d542a1566a25ad9910c03b946cb6ac8e",
+      "status": "inherited"
+    },
+    {
+      "source": "/usr/local/bin/bh-panel-packet-scan",
+      "path": "src/commands/bh-panel-packet-scan",
+      "original_sha256": "83fe81aa3c8d1f0e63c026d0bb7158d9935804fddc56550da5e9b1a65fae2739",
+      "status": "inherited"
+    },
+    {
+      "source": "/usr/local/bin/bh-probe-reader",
+      "path": "src/commands/bh-probe-reader",
+      "original_sha256": "3e4a3fe45bc45903bc90bcefc342de92938ee996944424719f84f552c13be027",
+      "status": "inherited"
+    },
+    {
+      "source": "/usr/local/bin/bh-panel-packet-general",
+      "path": "src/commands/bh-panel-packet-general",
+      "original_sha256": "be46b2e005cfb5c2c65a217c29b6ca0165369a64a3585d3705e915cc423ac829",
+      "status": "inherited"
+    },
+    {
+      "source": "/usr/local/bin/bh-panel-packet-live",
+      "path": "src/commands/bh-panel-packet-live",
+      "original_sha256": "2893c451e9e12d903a02a963a33402aa3d4184a8604765e8d8d73de0e9baafe8",
+      "status": "inherited"
+    },
+    {
+      "source": "/usr/local/bin/bh-panel-ap-find",
+      "path": "src/commands/bh-panel-ap-find",
+      "original_sha256": "73b3446243b8d33ee4f047bbe2b6df50f5f3bd54476c83c8082a8a110fcdf7d3",
+      "status": "inherited"
+    },
+    {
+      "source": "/usr/local/bin/lcd-wrap-targets",
+      "path": "src/commands/lcd-wrap-targets",
+      "original_sha256": "f7b7b8d832f5a6a05ac6852c93b46408f1cac85afc7d1304a1b01d77212063f9",
+      "status": "inherited"
+    },
+    {
+      "source": "/usr/local/bin/lcd-cli-reset",
+      "path": "src/commands/lcd-cli-reset",
+      "original_sha256": "f51f1e64a055afd7c964fe1f309416bba9117af719b416b0edb1c810009af274",
+      "status": "inherited"
+    }
+  ],
+  "held_from_payload": [
+    {
+      "source": "/etc/systemd/network/10-cloverkit-radio-0.link",
+      "reason": "integration or data placement requires explicit release review"
+    },
+    {
+      "source": "/etc/systemd/network/10-cloverkit-radio-2.link",
+      "reason": "integration or data placement requires explicit release review"
+    },
+    {
+      "source": "/etc/systemd/network/10-cloverkit-radio-1.link",
+      "reason": "integration or data placement requires explicit release review"
+    },
+    {
+      "source": "/etc/udev/rules.d/91-cloverkit-radio-names.rules",
+      "reason": "integration or data placement requires explicit release review"
+    },
+    {
+      "source": "/usr/local/lib/bh/lcd-system.py",
+      "reason": "integration or data placement requires explicit release review"
+    },
+    {
+      "source": "/usr/local/lib/bh/lcd-cli.sh",
+      "reason": "integration or data placement requires explicit release review"
+    },
+    {
+      "source": "/usr/local/lib/bh/lcd-wifi.py",
+      "reason": "integration or data placement requires explicit release review"
+    },
+    {
+      "source": "/usr/local/lib/bh/lcd-device-watch.py",
+      "reason": "integration or data placement requires explicit release review"
+    },
+    {
+      "source": "/usr/local/lib/bh/lcd-ethernet.py",
+      "reason": "integration or data placement requires explicit release review"
+    },
+    {
+      "source": "/usr/local/lib/bh/lcd-hosts.py",
+      "reason": "integration or data placement requires explicit release review"
+    },
+    {
+      "source": "/usr/local/lib/bh/lcd-security.py",
+      "reason": "integration or data placement requires explicit release review"
+    },
+    {
+      "source": "/usr/local/lib/bh/lcd-packet.py",
+      "reason": "integration or data placement requires explicit release review"
+    },
+    {
+      "source": "/usr/local/lib/bh/lcd-packet-live.py",
+      "reason": "integration or data placement requires explicit release review"
+    },
+    {
+      "source": "/usr/local/lib/bh/lcd-host-target.py",
+      "reason": "integration or data placement requires explicit release review"
+    },
+    {
+      "source": "/usr/local/lib/bh/lcd-target.py",
+      "reason": "integration or data placement requires explicit release review"
+    },
+    {
+      "source": "/usr/local/lib/bh/lcd-gui.py",
+      "reason": "integration or data placement requires explicit release review"
+    },
+    {
+      "source": "/mnt/security/authorized-ble.txt",
+      "reason": "integration or data placement requires explicit release review"
+    }
+  ],
+  "deferred": [
+    "/mnt/scripts/console-toggle.sh",
+    "/mnt/scripts/net-auto.sh",
+    "/mnt/scripts/net-direct.sh",
+    "/mnt/scripts/net-off.sh",
+    "/mnt/scripts/pc-recovery.sh",
+    "/mnt/scripts/vpn-toggle.sh",
+    "/usr/local/bin/bh-vpn",
+    "/usr/local/bin/console-off",
+    "/usr/local/bin/console-on",
+    "/usr/local/bin/console-status",
+    "/usr/local/bin/conwifi-run",
+    "/usr/local/bin/conwifi-run-local",
+    "/usr/local/bin/pc-test",
+    "/usr/local/lib/bh-interactive/console_email.py"
+  ],
+  "external_dependencies": [
+    {
+      "path": "/usr/local/bin/sec-validate",
+      "reason": "symlink needs explicit review"
+    },
+    {
+      "path": "/usr/local/bin/bhtui",
+      "reason": "binary dependency; use OS/upstream package"
+    }
+  ],
+  "policy": "Never package generated targets, captures, credentials, account state or historical backup files."
+}

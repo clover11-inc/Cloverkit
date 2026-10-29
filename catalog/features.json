@@ -1,0 +1,516 @@
+{
+  "schema": 1,
+  "features": [
+    {
+      "id": "panel",
+      "title": "Interactive Panel",
+      "menu": "Home",
+      "what": "Presents menus, controls and reports.",
+      "when": "Operate diagnostics from Flipper controls or a terminal.",
+      "value": "A consistent interface across tools.",
+      "sources": [
+        "src/panel/bh_panel.py"
+      ],
+      "limits": "Candidate not hardware-tested.",
+      "status": "alpha-hardware-validation-pending"
+    },
+    {
+      "id": "tasks",
+      "title": "Task management",
+      "menu": "Home > Tasks",
+      "what": "Streams output and manages owned task cancellation.",
+      "when": "Check progress, stop or review a task.",
+      "value": "Visible progress and controlled tool handover.",
+      "sources": [
+        "src/panel/bh_panel.py"
+      ],
+      "limits": "Cleanup paths need final regression tests.",
+      "status": "alpha-hardware-validation-pending"
+    },
+    {
+      "id": "wifi-basic",
+      "title": "Basic Wi-Fi scan",
+      "menu": "Network > WI-FI",
+      "what": "Discovers APs, signal, channels and names; creates targets.",
+      "when": "Find nearby APs for investigation.",
+      "value": "Discovery feeds focused follow-up actions.",
+      "sources": [
+        "src/commands/wifi-scan"
+      ],
+      "limits": "Grouping can be estimated; names may be absent.",
+      "status": "alpha-hardware-validation-pending"
+    },
+    {
+      "id": "wifi-advanced",
+      "title": "Advanced Wi-Fi scan",
+      "menu": "Network > WI-FI",
+      "what": "Collects passive AP/client metadata, directional retries and activity.",
+      "when": "Investigate reception and captured delivery evidence.",
+      "value": "Evidence includes sample counts, ages and limits.",
+      "sources": [
+        "src/commands/wifi-passive-health"
+      ],
+      "limits": "Hopping misses frames; retries are not end-to-end loss.",
+      "status": "alpha-hardware-validation-pending"
+    },
+    {
+      "id": "waterfall",
+      "title": "Wi-Fi waterfall",
+      "menu": "Network > WI-FI",
+      "what": "Shows AP packet RSSI by channel and over time.",
+      "when": "Walk around and compare signal observations.",
+      "value": "Readable live channel history.",
+      "sources": [
+        "src/panel/cloverkit_wifi_waterfall.py"
+      ],
+      "limits": "Not RF spectrum; 6 GHz needs tested hardware.",
+      "status": "alpha-hardware-validation-pending"
+    },
+    {
+      "id": "client-health",
+      "title": "Connected client health",
+      "menu": "Network > WI-FI",
+      "what": "Tests a connected external client, reachability and throughput.",
+      "when": "Separate local link symptoms from upstream limits.",
+      "value": "Combines measured checks and evidence coverage.",
+      "sources": [
+        "src/commands/wifi-health-connected"
+      ],
+      "limits": "Sends traffic; requires a connected managed test adapter.",
+      "status": "alpha-hardware-validation-pending"
+    },
+    {
+      "id": "wifi-targets",
+      "title": "Wi-Fi target tracking",
+      "menu": "Targets > Wi-Fi Targets",
+      "what": "Tracks selected APs, observed clients and probes.",
+      "when": "Focus on a discovered target.",
+      "value": "Continuous signal and freshness feedback.",
+      "sources": [
+        "src/commands/ap-find-compact"
+      ],
+      "limits": "Signal trend is not distance or guaranteed direction.",
+      "status": "alpha-hardware-validation-pending"
+    },
+    {
+      "id": "ethernet",
+      "title": "Ethernet link and switch",
+      "menu": "Network > ETHERNET",
+      "what": "Shows link, counters and observed LLDP/CDP/VLAN/LACP evidence.",
+      "when": "Identify a connected switch port and link symptoms.",
+      "value": "Combines port identity with live link status.",
+      "sources": [
+        "src/commands/ethernet-live"
+      ],
+      "limits": "Some fields require driver support or switch announcements.",
+      "status": "alpha-hardware-validation-pending"
+    },
+    {
+      "id": "direct-ethernet",
+      "title": "Direct Ethernet",
+      "menu": "Network > ETHERNET",
+      "what": "Provides passive, temporary static and diagnostic DHCP modes.",
+      "when": "Inspect directly connected equipment.",
+      "value": "Field diagnostics without its normal network.",
+      "sources": [
+        "src/commands/clover-direct-ethernet"
+      ],
+      "limits": "Active modes temporarily configure eth0; dual-adapter use is not implemented.",
+      "status": "alpha-hardware-validation-pending"
+    },
+    {
+      "id": "hosts",
+      "title": "Host discovery and profiles",
+      "menu": "Network > DISCOVERY & MONITORING",
+      "what": "Discovers responding hosts and profiles common services.",
+      "when": "Identify reachable equipment and service clues.",
+      "value": "Subnet overview leads to focused host targets.",
+      "sources": [
+        "src/commands/host-profile"
+      ],
+      "limits": "Active probes; empty output can be inconclusive.",
+      "status": "alpha-hardware-validation-pending"
+    },
+    {
+      "id": "topology",
+      "title": "Observed topology",
+      "menu": "Network > DISCOVERY & MONITORING",
+      "what": "Builds evidence-labelled neighbour and wireless relationships.",
+      "when": "Understand observed connections.",
+      "value": "Avoids inventing wired links from names or addresses.",
+      "sources": [
+        "src/panel/cloverkit_report.py"
+      ],
+      "limits": "Not a complete switch topology collector.",
+      "status": "alpha-hardware-validation-pending"
+    },
+    {
+      "id": "monitor",
+      "title": "Network monitor",
+      "menu": "Network > DISCOVERY & MONITORING",
+      "what": "Preserves the inherited monitoring/report workflow.",
+      "when": "Observe traffic over an interval.",
+      "value": "A fallback alongside focused capture tools.",
+      "sources": [
+        "src/commands/wifi-monitor"
+      ],
+      "limits": "Candidate stop/restore behaviour needs testing.",
+      "status": "alpha-hardware-validation-pending"
+    },
+    {
+      "id": "packets",
+      "title": "Packet capture",
+      "menu": "Network > Packet Captures",
+      "what": "Captures general, probe, station, EAPOL, deauthentication or raw observations.",
+      "when": "Collect protocol evidence for analysis.",
+      "value": "Different views of captured traffic.",
+      "sources": [
+        "src/commands/packet-live"
+      ],
+      "limits": "Observation is not transmission; broken legacy modes are quarantined.",
+      "status": "alpha-hardware-validation-pending"
+    },
+    {
+      "id": "packet-analysis",
+      "title": "Saved-capture analysis",
+      "menu": "Network > Packet Captures",
+      "what": "Analyses DNS, DHCP, TCP retransmission, ARP and broadcast evidence.",
+      "when": "Review an incident after capturing it.",
+      "value": "Turns packets into bounded diagnostic findings.",
+      "sources": [
+        "src/panel/cloverkit_report.py"
+      ],
+      "limits": "Missing or encrypted traffic can prevent interpretation.",
+      "status": "alpha-hardware-validation-pending"
+    },
+    {
+      "id": "routes",
+      "title": "Route and connectivity",
+      "menu": "Network > DIAGNOSTICS & CAPTURE",
+      "what": "Inspects addresses, routes and reachability.",
+      "when": "Check which path is used.",
+      "value": "Helps separate routing faults from radio symptoms.",
+      "sources": [
+        "src/commands/path-test"
+      ],
+      "limits": "Some checks send probes; VPN setup is deferred.",
+      "status": "alpha-hardware-validation-pending"
+    },
+    {
+      "id": "iperf",
+      "title": "iperf tools",
+      "menu": "Network > DIAGNOSTICS & CAPTURE",
+      "what": "Provides server controls and client/interface helpers.",
+      "when": "Measure throughput against a controlled peer.",
+      "value": "Local testing independent of Internet speed servers.",
+      "sources": [
+        "src/commands/iperf-server"
+      ],
+      "limits": "Requires a peer; server start opens a listening service.",
+      "status": "alpha-hardware-validation-pending"
+    },
+    {
+      "id": "security",
+      "title": "Security scan",
+      "menu": "Security > Security scan",
+      "what": "Collects service findings, CVE applicability and vendor evidence.",
+      "when": "Prioritise configuration/vendor review.",
+      "value": "Separates possible, observed and vendor-supported findings.",
+      "sources": [
+        "src/security/secscan.py"
+      ],
+      "limits": "Active checks; no registered CVE-specific execution validators.",
+      "status": "alpha-hardware-validation-pending"
+    },
+    {
+      "id": "device-watch",
+      "title": "Device Watch",
+      "menu": "Security > Device watch",
+      "what": "Collects BLE advertisements and Wi-Fi observations with confidence labels.",
+      "when": "Discover relevant nearby advertised devices.",
+      "value": "Selected targets avoid targeting all observations.",
+      "sources": [
+        "src/commands/device-watch"
+      ],
+      "limits": "Identities can be spoofed; foreground targets are capped.",
+      "status": "alpha-hardware-validation-pending"
+    },
+    {
+      "id": "ble-targets",
+      "title": "BLE target tracking",
+      "menu": "Targets > BLE Targets",
+      "what": "Tracks an advertised MAC with signal/freshness states.",
+      "when": "Follow an eligible discovered BLE device.",
+      "value": "Continuous fresh/stale/searching feedback.",
+      "sources": [
+        "src/commands/device-track"
+      ],
+      "limits": "Randomised MACs and quiet advertising affect continuity.",
+      "status": "alpha-hardware-validation-pending"
+    },
+    {
+      "id": "history",
+      "title": "Device history",
+      "menu": "Security > Device history",
+      "what": "Retains bounded appearance and change events.",
+      "when": "Compare scans across visits.",
+      "value": "Adds context beyond a single run.",
+      "sources": [
+        "src/panel/cloverkit_device_history.py"
+      ],
+      "limits": "Not seen does not prove departure.",
+      "status": "alpha-hardware-validation-pending"
+    },
+    {
+      "id": "survey",
+      "title": "Site survey reports",
+      "menu": "CLI report tools",
+      "what": "Records location-tagged readings and exports floor-plan HTML.",
+      "when": "Compare measurements at labelled positions.",
+      "value": "Portable offline measured-point reporting.",
+      "sources": [
+        "src/panel/cloverkit_report.py"
+      ],
+      "limits": "No interpolated coverage prediction.",
+      "status": "alpha-hardware-validation-pending"
+    },
+    {
+      "id": "radio-reset",
+      "title": "Wi-Fi recovery",
+      "menu": "System > Device Network Controls",
+      "what": "Reports adapter state and restores permitted development radios.",
+      "when": "Recover after interrupted capture.",
+      "value": "Controlled recovery with built-in radio protection.",
+      "sources": [
+        "src/commands/cloverkit-radio-reset"
+      ],
+      "limits": "Needs hardware registration; refuses conflicting owners.",
+      "status": "alpha-hardware-validation-pending"
+    },
+    {
+      "id": "serial",
+      "title": "Shared serial console",
+      "menu": "CLI: console",
+      "what": "Provides one serial owner shared by local/remote terminal clients.",
+      "when": "Reach physical console equipment and collaborate.",
+      "value": "Portable console-server workflow.",
+      "sources": [
+        "src/panel/shared_console.py"
+      ],
+      "limits": "Account/privilege activation is gated; no remote access is enabled.",
+      "status": "alpha-hardware-validation-pending"
+    },
+    {
+      "id": "report-sharing",
+      "title": "Remote report viewing",
+      "menu": "Optional; activation deferred",
+      "what": "Retains an independent restricted scan-report browser.",
+      "when": "Let a remote colleague inspect the local scan.",
+      "value": "Two-person troubleshooting without shared navigation.",
+      "sources": [
+        "src/panel/conwifi_report.py"
+      ],
+      "limits": "Candidate includes optional SMTP and local credential fallback; account/policy activation remains gated.",
+      "status": "alpha-hardware-validation-pending"
+    },
+    {
+      "id": "display",
+      "title": "Display and startup",
+      "menu": "System / startup",
+      "what": "Renders the local LCD and manages display handover.",
+      "when": "Use the toolkit without a desktop.",
+      "value": "Consistent portable presentation and terminal fallback.",
+      "sources": [
+        "src/panel/clover_lcd_panel.py"
+      ],
+      "limits": "Platform/display defaults and asset rights need review.",
+      "status": "alpha-hardware-validation-pending"
+    },
+    {
+      "id": "games",
+      "title": "Game controls",
+      "menu": "Optional module",
+      "what": "Preserves ROM discovery and bhtui control integration.",
+      "when": "Use the existing game workflow when configured.",
+      "value": "Secondary use without a core dependency.",
+      "sources": [
+        "src/panel/clover_game_session.py"
+      ],
+      "limits": "No ROMs or emulator binary bundled; not certified.",
+      "status": "optional-unvalidated"
+    },
+    {
+      "id": "uplink-auto-connect",
+      "title": "Uplink Auto-Connect",
+      "menu": "Deferred",
+      "what": "Connects to saved uplink profiles according to user preferences.",
+      "when": "Reconnect across known networks.",
+      "value": "Convenient management connectivity.",
+      "sources": [],
+      "limits": "Deferred by request; personal watcher not packaged.",
+      "status": "deferred"
+    },
+    {
+      "id": "email",
+      "title": "Email setup",
+      "menu": "System > Email setup",
+      "what": "Guides SMTP setup and shares one sender across access notifications.",
+      "when": "Configure optional credential delivery from SSH or serial.",
+      "value": "Access works without email; failure retains local details.",
+      "sources": [
+        "src/panel/cloverkit_optional_setup.py"
+      ],
+      "limits": "Requires TLS SMTP/app credentials; no test email sent by setup.",
+      "status": "alpha-hardware-validation-pending"
+    },
+    {
+      "id": "vpn",
+      "title": "VPN setup",
+      "menu": "System > VPN setup",
+      "what": "Imports a self-contained OpenVPN profile and offers explicit On/Off.",
+      "when": "Use your chosen VPN provider when configured.",
+      "value": "No provider lock-in and no connection before configuration.",
+      "sources": [
+        "src/panel/cloverkit_optional_setup.py"
+      ],
+      "limits": "Conservative import rejects unsupported profile directives; account/service activation gated.",
+      "status": "alpha-hardware-validation-pending"
+    },
+    {
+      "id": "recovery-hotspot",
+      "title": "Recovery hotspot",
+      "menu": "System > Recovery hotspot",
+      "what": "Configures a phone/router hotspot name and password for management override.",
+      "when": "Regain control through a known reachable hotspot.",
+      "value": "Provides an owner-configured recovery path without a preconfigured hotspot.",
+      "sources": [
+        "src/panel/cloverkit_recovery_hotspot.py"
+      ],
+      "limits": "Opt-in; can switch wlan0. WPA personal hotspot only; no enterprise/captive-portal setup.",
+      "status": "alpha-hardware-validation-pending"
+    },
+    {
+      "id": "vehicle-diagnostics",
+      "title": "Vehicle Diagnostics",
+      "menu": "Home > Vehicle Diagnostics",
+      "what": "Reads standard engine/emissions codes, readiness, freeze frames and live values; records and exports evidence with an offline DTC library.",
+      "when": "Investigate check-engine conditions, compare scans and capture changing readings without an internet connection.",
+      "value": "Local display, console and authenticated browser share one cancellable adapter owner and source-aware explanations.",
+      "sources": [
+        "src/panel/cloverkit_vehicle_menu.py",
+        "src/vehicle/cloverkit_vehicle/engine.py",
+        "src/vehicle/cloverkit_vehicle/backend.py",
+        "src/vehicle/cloverkit_vehicle/service.py",
+        "src/vehicle/cloverkit_vehicle/reference.py"
+      ],
+      "limits": "Vehicle and adapter support varies. Standard engine/emissions only. USB, Classic SPP and vehicle decoding await physical adapter/vehicle testing. Community definitions remain unverified; package activation remains gated.",
+      "status": "software-validated-hardware-pending"
+    },
+    {
+      "id": "system",
+      "title": "System and hardware status",
+      "menu": "System",
+      "what": "Shows temperature, memory, storage, uptime, interfaces and hardware/service status.",
+      "when": "Check field readiness and resource pressure.",
+      "value": "Quickly separates a resource or link problem from a diagnostic result.",
+      "sources": [
+        "src/commands/system",
+        "src/panel/bh_panel.py"
+      ],
+      "limits": "Readings describe the local board; platform sensors may be absent.",
+      "status": "alpha-software-validation"
+    },
+    {
+      "id": "usb",
+      "title": "USB device inventory",
+      "menu": "System",
+      "what": "Enumerates connected USB hardware and available adapters.",
+      "when": "Identify connected field peripherals.",
+      "value": "Makes adapter availability visible before starting a workflow.",
+      "sources": [
+        "src/commands/usb-scan"
+      ],
+      "limits": "USB product labels do not establish chipset/driver capabilities.",
+      "status": "alpha-software-validation"
+    },
+    {
+      "id": "target-workflows",
+      "title": "Generated target workflows",
+      "menu": "Targets",
+      "what": "Groups discovered hosts, APs, BLE devices and security findings into follow-up actions.",
+      "when": "Move from discovery to a focused investigation without retyping identifiers.",
+      "value": "Connects discovery, evidence and tracking in one interface.",
+      "sources": [
+        "src/commands/target-build-wifi",
+        "src/commands/target-clean",
+        "src/panel/bh_panel.py"
+      ],
+      "limits": "Targets can be stale; identity and severity retain their original uncertainty.",
+      "status": "alpha-software-validation"
+    },
+    {
+      "id": "native-radio",
+      "title": "Protected uplink radio",
+      "menu": "System > Device Network Controls",
+      "what": "Verifies registered radio identity and bus before allowing USB capture/reset workflows.",
+      "when": "Keep the native management uplink separate from development radios.",
+      "value": "Reduces accidental loss of management access during radio work.",
+      "sources": [
+        "src/panel/cloverkit_radio_identity.py",
+        "src/commands/cloverkit-name-radios"
+      ],
+      "limits": "Requires real device registration; USB naming/order and firmware still need device-specific testing.",
+      "status": "alpha-software-validation"
+    },
+    {
+      "id": "flipper",
+      "title": "Flipper control and power",
+      "menu": "Flipper companion",
+      "what": "The board accepts menu controls from a compatible separately supplied Flipper app.",
+      "when": "Operate the board while walking without attaching a laptop.",
+      "value": "Supports local field operation when a compatible companion is available.",
+      "sources": [],
+      "limits": "No companion app or FAP is distributed in this release. Use PC serial or SSH.",
+      "status": "not-included"
+    },
+    {
+      "id": "offline-docs",
+      "title": "Locally generated documentation",
+      "menu": "SSH / serial",
+      "what": "Generates feature and process guides from source/catalog hashes.",
+      "when": "Read purpose, use cases, value and limits without internet.",
+      "value": "Documentation travels with the tools and can be reviewed alongside the implementation.",
+      "sources": [
+        "tools/generate_docs.py",
+        "tools/cloverkit.py"
+      ],
+      "limits": "The process map is static evidence, not proof of complete runtime dependency closure.",
+      "status": "alpha-software-validation"
+    },
+    {
+      "id": "obd-flow",
+      "title": "OBD traffic and keyboard access",
+      "menu": "Vehicle Diagnostics > Remote access & data flow",
+      "what": "Displays actual ELM serial TX/RX and queues read-only typed requests through the shared owner.",
+      "when": "Understand adapter responses or drive diagnostics from a PC keyboard.",
+      "value": "Links decoded readings to real adapter traffic without a second serial reader.",
+      "sources": [
+        "src/vehicle/cloverkit_vehicle/traffic.py",
+        "src/vehicle/cloverkit_vehicle/ssh_console.py"
+      ],
+      "limits": "Not a passive raw CAN monitor. Optional conveh provisioning is opt-in; physical adapter/vehicle testing pending.",
+      "status": "alpha-software-validation"
+    },
+    {
+      "id": "pc-recovery",
+      "title": "PC Recovery",
+      "menu": "Deferred",
+      "what": "Private development recovery workflows are not packaged for activation.",
+      "when": "Future integration of owner-configured recovery tools.",
+      "value": "Keeps personal recovery media and setup out of the public source package.",
+      "sources": [],
+      "limits": "Deferred; not an active public-release feature.",
+      "status": "deferred"
+    }
+  ]
+}

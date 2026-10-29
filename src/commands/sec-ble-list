@@ -1,0 +1,14 @@
+#!/bin/bash
+
+FILE="/mnt/security/authorized-ble.txt"
+
+echo
+echo "AUTHORIZED BLE SECURITY TARGETS"
+echo "======================================"
+
+if [ ! -s "$FILE" ]; then
+    echo "None."
+    exit 0
+fi
+
+cat "$FILE"

@@ -1,0 +1,7 @@
+# Preserve exact release bytes so clones match the signed-off checksums.
+* -text
+*.png binary
+*.fap binary
+*.whl binary
+*.tar.gz binary
+*.sqlite3 binary

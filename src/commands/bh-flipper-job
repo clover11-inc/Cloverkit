@@ -1,0 +1,220 @@
+#!/usr/bin/env python3
+
+import fcntl
+import json
+import os
+import signal
+import subprocess
+import sys
+import time
+from pathlib import Path
+
+
+STATE_DIR = Path("/run/bh-flipper-job")
+STATE_FILE = STATE_DIR / "active.json"
+LOCK_FILE = STATE_DIR / "lock"
+
+TERM_TIMEOUT = 2.0
+
+CHILD_MARKER = b"BH_FLIPPER_JOB_CHILD=1"
+
+
+def process_exists(pid):
+    if not isinstance(pid, int) or pid <= 0:
+        return False
+
+    try:
+        os.kill(pid, 0)
+        return True
+
+    except ProcessLookupError:
+        return False
+
+    except PermissionError:
+        return True
+
+
+def owned_process(pid):
+    """
+    Only touch processes that were explicitly created by this manager.
+
+    Both conditions must be true:
+      - environment contains BH_FLIPPER_JOB_CHILD=1
+      - process is its own process-group leader
+    """
+
+    if not process_exists(pid):
+        return False
+
+    try:
+        environ = Path(
+            f"/proc/{pid}/environ"
+        ).read_bytes()
+
+        entries = environ.split(b"\0")
+
+        if CHILD_MARKER not in entries:
+            return False
+
+        if os.getpgid(pid) != pid:
+            return False
+
+    except (
+        FileNotFoundError,
+        ProcessLookupError,
+        PermissionError,
+        OSError,
+    ):
+        return False
+
+    return True
+
+
+def load_old_pid():
+    try:
+        data = json.loads(
+            STATE_FILE.read_text()
+        )
+
+        pid = int(data.get("pid", 0))
+
+        if pid > 0:
+            return pid
+
+    except Exception:
+        pass
+
+    return 0
+
+
+def clear_state():
+    try:
+        STATE_FILE.unlink()
+    except FileNotFoundError:
+        pass
+
+
+def stop_old_job(pid):
+    if not owned_process(pid):
+        clear_state()
+        return
+
+    try:
+        os.killpg(pid, signal.SIGTERM)
+
+    except ProcessLookupError:
+        clear_state()
+        return
+
+    deadline = time.monotonic() + TERM_TIMEOUT
+
+    while time.monotonic() < deadline:
+
+        if not process_exists(pid):
+            clear_state()
+            return
+
+        time.sleep(0.05)
+
+    if owned_process(pid):
+
+        try:
+            os.killpg(pid, signal.SIGKILL)
+        except ProcessLookupError:
+            pass
+
+    deadline = time.monotonic() + 0.5
+
+    while time.monotonic() < deadline:
+
+        if not process_exists(pid):
+            break
+
+        time.sleep(0.05)
+
+    clear_state()
+
+
+def save_state(pid, argv):
+    tmp = STATE_DIR / (
+        f"active.json.tmp.{os.getpid()}"
+    )
+
+    data = {
+        "pid": pid,
+        "started": time.time(),
+        "argv": argv,
+    }
+
+    tmp.write_text(
+        json.dumps(
+            data,
+            indent=2,
+            sort_keys=True,
+        )
+        + "\n"
+    )
+
+    os.replace(tmp, STATE_FILE)
+
+
+def main():
+    if len(sys.argv) < 2:
+        print(
+            "usage: bh-flipper-job "
+            "<script> [args...]",
+            file=sys.stderr,
+        )
+        return 2
+
+    script = sys.argv[1]
+    script_args = sys.argv[2:]
+
+    STATE_DIR.mkdir(
+        mode=0o755,
+        parents=True,
+        exist_ok=True,
+    )
+
+    with LOCK_FILE.open("a+") as lock:
+
+        fcntl.flock(
+            lock.fileno(),
+            fcntl.LOCK_EX,
+        )
+
+        old_pid = load_old_pid()
+
+        if old_pid:
+            stop_old_job(old_pid)
+
+        env = os.environ.copy()
+
+        env["BH_FLIPPER_JOB_CHILD"] = "1"
+
+        argv = [
+            "/usr/local/bin/lcd-run",
+            script,
+            *script_args,
+        ]
+
+        proc = subprocess.Popen(
+            argv,
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            env=env,
+            start_new_session=True,
+            close_fds=True,
+        )
+
+        save_state(
+            proc.pid,
+            argv,
+        )
+
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

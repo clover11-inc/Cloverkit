@@ -1,0 +1,10 @@
+[Unit]
+Description=Protect native radio and discover USB adapters
+Wants=systemd-udev-settle.service
+After=systemd-udev-settle.service
+Before=NetworkManager.service
+[Service]
+Type=oneshot
+ExecStart=/usr/local/bin/cloverkit-name-radios
+[Install]
+WantedBy=multi-user.target

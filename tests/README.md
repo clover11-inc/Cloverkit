@@ -1,0 +1,1 @@
+Offline tests use fake SMTP/account calls, simulated OBD connections and Linux PTYs. They do not certify physical adapters, vehicle compatibility or a fresh full-device install. Run unittest discovery from the project root; preserve the validation report when sharing results.

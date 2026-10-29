@@ -1,0 +1,579 @@
+Package: arping
+Version: 2.29-1
+Installed-Size: 95
+Architecture: armhf
+Depends: libc6 (>= 2.38), libnet9 (>= 1.1.3), libpcap0.8t64 (>= 1.5.1), libseccomp2 (>= 1.0.1)
+Conflicts: iputils-arping
+Size: 33952
+SHA256: c3be6a7f912b6a21826969259ec66ae495182a51be1a54170fa414f5652c61ed
+Section: net
+Priority: optional
+Filename: debs/arping_2.29-1_armhf.deb
+
+Package: bind9-dnsutils
+Source: bind9
+Version: 1:9.20.29-1
+Installed-Size: 582
+Architecture: armhf
+Provides: dnsutils
+Depends: bind9-host | host, bind9-libs (= 1:9.20.29-1), libc6 (>= 2.38), libedit2 (>= 2.11-20080614-0), libidn2-0 (>= 2.0.0), libjemalloc2 (>= 3.5.0), libkrb5-3 (>= 1.6.dfsg.2), libprotobuf-c1 (>= 1.0.0)
+Size: 152252
+SHA256: a197901dca64c44ea6dc829bcce7f34e733021646bf42182a254b07979b0bb28
+Section: net
+Priority: standard
+Filename: debs/bind9-dnsutils_9.20.29-1_armhf.deb
+
+Package: bind9-host
+Source: bind9
+Version: 1:9.20.29-1
+Installed-Size: 155
+Architecture: armhf
+Replaces: bind-host (<< 1:9.13.6~)
+Provides: host
+Depends: bind9-libs (= 1:9.20.29-1), libc6 (>= 2.38), libidn2-0 (>= 2.0.0)
+Breaks: bind-host (<< 1:9.13.6~)
+Size: 47696
+SHA256: f975efd1e29c0dd0808e9510e4f951e64464dfd8cee01340c7707bdf0978be34
+Section: net
+Priority: standard
+Filename: debs/bind9-host_9.20.29-1_armhf.deb
+
+Package: bind9-libs
+Source: bind9
+Version: 1:9.20.29-1
+Installed-Size: 2621
+Architecture: armhf
+Replaces: bind-libs (<< 1:9.13.6~)
+Depends: libc6 (>= 2.38), libfstrm0 (>= 0.2.0), libgssapi-krb5-2 (>= 1.17), libjemalloc2 (>= 4.0.0), libjson-c5 (>= 0.15), libkrb5-3 (>= 1.6.dfsg.2), liblmdb0 (>= 0.9.7), libmaxminddb0 (>= 1.3.0), libnghttp2-14 (>= 1.12.0), libprotobuf-c1 (>= 1.0.1), libssl3t64 (>= 3.4.0), liburcu8t64 (>= 0.13.0), libuv1t64 (>= 1.38.0), libxml2-16 (>= 2.14.1), zlib1g (>= 1:1.1.4)
+Breaks: bind-libs (<< 1:9.13.6~)
+Size: 1103680
+SHA256: e8fd9678fb620324a8c5b1c5924fae6b51af7fc68f54dedb5bc9a4681b4c9d4b
+Section: libs
+Priority: optional
+Filename: debs/bind9-libs_9.20.29-1_armhf.deb
+
+Package: bluez
+Version: 5.87-5
+Installed-Size: 4692
+Architecture: armhf
+Depends: default-dbus-system-bus | dbus-system-bus, kmod, udev, systemd | systemd-standalone-sysusers | systemd-sysusers, libasound2t64 (>= 1.0.17), libc6 (>= 2.42), libdbus-1-3 (>= 1.10), libdw1t64 (>= 0.127), libglib2.0-0t64 (>= 2.76.0), libreadline8t64 (>= 7.0~rc1), libudev1 (>= 196)
+Size: 1480696
+SHA256: a2f5c3125844516f7b8c658e1df0637e6f93384b9bf62a354bd6c6faedcde54e
+Section: admin
+Priority: optional
+Filename: debs/bluez_5.87-5_armhf.deb
+
+Package: libbcg729-0
+Source: bcg729
+Version: 1.1.2-1
+Installed-Size: 85
+Architecture: armhf
+Depends: libc6 (>= 2.4)
+Size: 31708
+SHA256: 2aca5e2e7de35a3beb95923b16f8a89b3e5ae4e8810567f29fe57fca707a4279
+Section: libs
+Priority: optional
+Filename: debs/libbcg729-0_1.1.2-1_armhf.deb
+
+Package: libc-bin
+Source: glibc
+Version: 2.43-7
+Installed-Size: 1837
+Architecture: armhf
+Depends: libc6 (>> 2.43), libc6 (<< 2.44)
+Size: 511344
+SHA256: 0861c05fe71236ad76ed5970a736f5bb2ecfb70be84239ae1a350d3167556bf3
+Section: libs
+Priority: required
+Filename: debs/libc-bin_2.43-7_armhf.deb
+
+Package: libc-dev-bin
+Source: glibc
+Version: 2.43-7
+Installed-Size: 147
+Architecture: armhf
+Depends: libc6 (>> 2.43), libc6 (<< 2.44)
+Size: 38284
+SHA256: 4910e2901fbe509e8aafce9a3b576df3a60d262da60a8ee4add60349eedef063
+Section: libdevel
+Priority: optional
+Filename: debs/libc-dev-bin_2.43-7_armhf.deb
+
+Package: libc-gconv-modules-extra
+Source: glibc
+Version: 2.43-7
+Installed-Size: 18546
+Architecture: armhf
+Replaces: libc6 (<< 2.42-1)
+Breaks: libc6 (<< 2.42-1)
+Size: 1139324
+SHA256: c7982f19124b0a4d8c36198d2e24b857a88056822fa96df75a16122068f281d6
+Section: libs
+Priority: optional
+Filename: debs/libc-gconv-modules-extra_2.43-7_armhf.deb
+
+Package: libc-l10n
+Source: glibc
+Version: 2.43-7
+Installed-Size: 4944
+Architecture: all
+Size: 750860
+SHA256: 85ea888550215f237776ba74b0a7294cca4e707532800740ff227b71d3d3d344
+Section: localization
+Priority: standard
+Filename: debs/libc-l10n_2.43-7_all.deb
+
+Package: libc6
+Source: glibc
+Version: 2.43-7
+Installed-Size: 4806
+Architecture: armhf
+Depends: libgcc-s1, libc-gconv-modules-extra (= 2.43-7)
+Breaks: base-files (<< 13.3~), dhcpcd (<< 1:10.1.0-7~), doublecmd-gtk (<< 1.1.22-1+b1), doublecmd-plugins (<< 1.1.22-1+b1), doublecmd-qt (<< 1.1.22-1+b1), libamdhip64-5 (<< 5.7.1-5+b1), libde265-0 (<< 1.0.15-1+b3), libhiprtc-builtins5 (<< 5.7.1-5+b1), libmad0 (<< 0.15.1b-11+b1), libmpeg2-4 (<< 0.5.1-9+b3), libne10-10t64 (<< 1.2.1-5.1+b2), libopenblas0-openmp (<< 0.3.29+ds-2+b1), libopenblas0-pthread (<< 0.3.29+ds-2+b1), libopenblas0-serial (<< 0.3.29+ds-2+b1), librccl1 (<< 5.4.3-3+b1), libswupdate0.1 (<< 2024.12.1+dfsg-1+b3), libx264-164 (<< 2:0.164.3108+git31e19f9-2+b1), locales (<< 2.43), locales-all (<< 2.43), lua-swupdate (<< 2024.12.1+dfsg-1+b3), nscd (<< 2.43), pd-scaf (<< 1:0.14.1+darcs20180201-6+b4), postgresql-15-pllua (<< 1:2.0.12-4), postgresql-17-pllua (<< 1:2.0.12-3+b2), python3-mrgingham (<< 1.25-1), python3-onnxruntime (<< 1.20.1+dfsg-2~), sysvinit (<< 3.09-2~), sysvinit-core (<< 3.09-2~), uwsgi-plugin-pypy3 (<< 0.0.2+b1)
+Size: 1539228
+SHA256: 5d6117995d198490f9ec2ed1c628d8adeebda0cec332de0f984983316521a0e3
+Section: libs
+Priority: optional
+Filename: debs/libc6_2.43-7_armhf.deb
+
+Package: libc6-dev
+Source: glibc
+Version: 2.43-7
+Installed-Size: 6991
+Architecture: armhf
+Provides: libc-dev (= 2.43-7)
+Depends: libc6 (= 2.43-7), libc-dev-bin (= 2.43-7), linux-libc-dev
+Conflicts: libc0.3-dev, libc6.1-dev
+Breaks: catch (<< 1.12.2-0.1), libc6-dev-armhf-cross (<< 2.43~), libmysqlclient-dev (<= 8.0.29-1)
+Size: 1401936
+SHA256: 62b030252d87b92ee9d21f7cbe581d3a5b6e268c0d08760a06cb15292ab7563e
+Section: libdevel
+Priority: optional
+Filename: debs/libc6-dev_2.43-7_armhf.deb
+
+Package: libcares2
+Source: c-ares
+Version: 1.34.8-1
+Installed-Size: 242
+Architecture: armhf
+Replaces: libc-ares1, libc-ares2
+Depends: libc6 (>= 2.38)
+Breaks: libc-ares2 (<< 1.34.8-1)
+Size: 81548
+SHA256: 83031f06f99ae64b53ab0de7955654ccf22202024ef55607fefebf3112a87eb7
+Section: libs
+Priority: optional
+Filename: debs/libcares2_1.34.8-1_armhf.deb
+
+Package: libfalcosecurity0.23
+Source: falcosecurity-libs
+Version: 0.23.2-6
+Installed-Size: 5050
+Architecture: armhf
+Replaces: libfalcosecurity0t64 (<< 0.23.2-6~)
+Depends: libc6 (>= 2.43), libelf1t64 (>= 0.131), libgcc-s1 (>= 3.5), libjsoncpp26 (>= 1.9.6), libre2-11-absl20260526, libstdc++6 (>= 14), libtbb12 (>= 2023.1.0), zlib1g (>= 1:1.2.6)
+Breaks: libfalcosecurity0t64 (<< 0.23.2-6~)
+Size: 746780
+SHA256: d7710abe20f48c510b04129d7c58ac215b3a88959240ef01ca8706e5a8b21458
+Section: libs
+Priority: optional
+Filename: debs/libfalcosecurity0.23_0.23.2-6_armhf.deb
+
+Package: libfstrm0
+Source: fstrm (0.6.1-1)
+Version: 0.6.1-1+b4
+Installed-Size: 91
+Architecture: armhf
+Depends: libc6 (>= 2.38)
+Size: 18764
+SHA256: 9d6c4fc04fcde358e0291a8c820db794cba9aac23ff892fb8c8a0bdc8e434a7f
+Section: libs
+Priority: optional
+Filename: debs/libfstrm0_0.6.1-1+b4_armhf.deb
+
+Package: libjs-sphinxdoc
+Source: sphinx
+Version: 9.1.0-9
+Installed-Size: 286
+Architecture: all
+Size: 46288
+SHA256: 4872e8c4069d908912123853d92b543bc3741234545912269f3890b73f69b62a
+Section: javascript
+Priority: optional
+Filename: debs/libjs-sphinxdoc_9.1.0-9_all.deb
+
+Package: libjson-c5
+Source: json-c
+Version: 0.19+ds-1
+Installed-Size: 102
+Architecture: armhf
+Depends: libc6 (>= 2.38)
+Size: 42660
+SHA256: fd9591e251f8b66eec5f5aea7ff948436e057168c3d237791ff47b44db7bd783
+Section: libs
+Priority: optional
+Filename: debs/libjson-c5_0.19+ds-1_armhf.deb
+
+Package: liblmdb0
+Source: lmdb
+Version: 0.9.35-1
+Installed-Size: 83
+Architecture: armhf
+Depends: libc6 (>= 2.38)
+Size: 38072
+SHA256: 8d08d5f40dfa4b736a6a108ab1fc618b787424c5c7634ed15d815290fcc2e674
+Section: libs
+Priority: optional
+Filename: debs/liblmdb0_0.9.35-1_armhf.deb
+
+Package: libmaxminddb0
+Source: libmaxminddb
+Version: 1.13.3-1
+Installed-Size: 101
+Architecture: armhf
+Depends: libc6 (>= 2.38)
+Size: 24764
+SHA256: 916a64171fb969bd94959b469a92f2ef66c48a552bc288af373aa80c17e96161
+Section: libs
+Priority: optional
+Filename: debs/libmaxminddb0_1.13.3-1_armhf.deb
+
+Package: libnet9
+Source: libnet (1.3+dfsg-3)
+Version: 1.3+dfsg-3+b2
+Installed-Size: 104
+Architecture: armhf
+Depends: libc6 (>= 2.38)
+Size: 44672
+SHA256: 7b425bf43c2ff0ddaef8301fb50637035b0039c996445aef7f710f1c7f7a0298
+Section: libs
+Priority: optional
+Filename: debs/libnet9_1.3+dfsg-3+b2_armhf.deb
+
+Package: libopencore-amrnb0
+Source: opencore-amr (0.1.6-1)
+Version: 0.1.6-1+b3
+Installed-Size: 152
+Architecture: armhf
+Depends: libc6 (>= 2.4)
+Size: 83808
+SHA256: b6d334c4ba539b5d70e0db6c226da1502ea953624818ffe6af0fa7a2d2ce4990
+Section: libs
+Priority: optional
+Filename: debs/libopencore-amrnb0_0.1.6-1+b3_armhf.deb
+
+Package: libpcre2-8-0
+Source: pcre2
+Version: 10.48-3.1
+Installed-Size: 597
+Architecture: armhf
+Depends: libc6 (>= 2.34)
+Size: 265816
+SHA256: 646b37e4422e87668423fac1768a6f214fd268d24805e77f462579a4ca25e844
+Section: libs
+Priority: optional
+Filename: debs/libpcre2-8-0_10.48-3.1_armhf.deb
+
+Package: libprotobuf-c1
+Source: protobuf-c (1.5.1-1)
+Version: 1.5.1-1+b2
+Installed-Size: 87
+Architecture: armhf
+Depends: libc6 (>= 2.4)
+Size: 18016
+SHA256: dda8f0e8b22d54047545dc93e8c99b72bfdba088659f69e93dd968fc7c56a90e
+Section: libs
+Priority: optional
+Filename: debs/libprotobuf-c1_1.5.1-1+b2_armhf.deb
+
+Package: libre2-11
+Source: re2 (20251105-1)
+Version: 20251105-1+b3
+Installed-Size: 340
+Architecture: armhf
+Provides: libre2-11-absl20260526
+Depends: libabsl20260526 (>= 20260526.0-0~), libc6 (>= 2.38), libgcc-s1 (>= 3.5), libstdc++6 (>= 14)
+Size: 138504
+SHA256: 6b55327a931144e45ed791e4c3d31f1b7a8cfc76f5b28fcf9e601e5ed33d063f
+Section: libs
+Priority: optional
+Filename: debs/libre2-11_20251105-1+b3_armhf.deb
+
+Package: libsbc1
+Source: sbc (2.1-1)
+Version: 2.1-1+b2
+Installed-Size: 85
+Architecture: armhf
+Depends: libc6 (>= 2.4)
+Size: 24576
+SHA256: d847e4b74655eca76edbeff977fba4b12bc2442d07a22faf5c1edfd05553681d
+Section: libs
+Priority: optional
+Filename: debs/libsbc1_2.1-1+b2_armhf.deb
+
+Package: libsmi2t64
+Source: libsmi (0.4.8+dfsg2-18)
+Version: 0.4.8+dfsg2-18+b1
+Installed-Size: 398
+Architecture: armhf
+Replaces: libsmi0, libsmi1, libsmi2, libsmi2ldbl
+Depends: libc6 (>= 2.34)
+Conflicts: libsmi0, libsmi1, libsmi2
+Breaks: libsmi2ldbl (<< 0.4.8+dfsg2-18)
+Size: 107756
+SHA256: 4c34e5d8a942198578d9672edfbe377f08e8bea29a2b4165bb00b469c4566715
+Section: libs
+Priority: optional
+Filename: debs/libsmi2t64_0.4.8+dfsg2-18+b1_armhf.deb
+
+Package: libsnappy1v5
+Source: snappy
+Version: 1.3.1-3
+Installed-Size: 112
+Architecture: armhf
+Depends: libc6 (>= 2.4), libgcc-s1 (>= 3.5), libstdc++6 (>= 5.2)
+Conflicts: libsnappy1
+Size: 29396
+SHA256: 4fa6803385e202707daa5607636d25bb52884e89b882a1ed8e36fb19c22d78ca
+Section: libs
+Priority: optional
+Filename: debs/libsnappy1v5_1.3.1-3_armhf.deb
+
+Package: libspandsp2t64
+Source: spandsp (0.0.6+dfsg-2.2)
+Version: 0.0.6+dfsg-2.2+b2
+Installed-Size: 634
+Architecture: armhf
+Replaces: libspandsp2
+Depends: libc6 (>= 2.34), libtiff6 (>= 4.0.3)
+Breaks: libspandsp2 (<< 0.0.6+dfsg-2.2)
+Size: 242892
+SHA256: 3b8747fc66333ad73ff341b0342443eda15c7c56085820220b88c68b00d1f72f
+Section: libs
+Priority: optional
+Filename: debs/libspandsp2t64_0.0.6+dfsg-2.2+b2_armhf.deb
+
+Package: libspeexdsp1
+Source: speexdsp
+Version: 1.2.1-4
+Installed-Size: 86
+Architecture: armhf
+Depends: libc6 (>= 2.29)
+Size: 35428
+SHA256: 651140f8a6757797b5432830bc8a9422a45f2752af4f8890aed93da1d6a855f5
+Section: libs
+Priority: optional
+Filename: debs/libspeexdsp1_1.2.1-4_armhf.deb
+
+Package: libtbb12
+Source: onetbb
+Version: 2023.1.0-3
+Installed-Size: 219
+Architecture: armhf
+Depends: libtbbbind-2-5 (= 2023.1.0-3), libtbbmalloc2 (= 2023.1.0-3), libc6 (>= 2.38), libgcc-s1 (>= 3.5), libstdc++6 (>= 14)
+Breaks: libtbb2 (<< 2021)
+Size: 83232
+SHA256: efd7690da28ddaaa2c783097e08b6c8c68061e26fdf06bffa9f28d24d843dd92
+Section: libs
+Priority: optional
+Filename: debs/libtbb12_2023.1.0-3_armhf.deb
+
+Package: libtbbbind-2-5
+Source: onetbb
+Version: 2023.1.0-3
+Installed-Size: 90
+Architecture: armhf
+Depends: libc6 (>= 2.4), libgcc-s1 (>= 3.5), libhwloc15 (>= 2.14.0), libstdc++6 (>= 4.1.1)
+Size: 11792
+SHA256: 9732c0cc77042d8fa8b043d1e1ac9b25fdb30ebbefe7d83138720807045c4ec4
+Section: libs
+Priority: optional
+Filename: debs/libtbbbind-2-5_2023.1.0-3_armhf.deb
+
+Package: libtbbmalloc2
+Source: onetbb
+Version: 2023.1.0-3
+Installed-Size: 222
+Architecture: armhf
+Replaces: libtbb12 (<< 2021.5-7ubuntu2), libtbb2 (<< 2020.3-1ubuntu2)
+Depends: libc6 (>= 2.38), libgcc-s1 (>= 3.5), libstdc++6 (>= 4.9)
+Breaks: libtbb12 (<< 2021.5-7ubuntu2), libtbb2 (<< 2020.3-1ubuntu2)
+Size: 42532
+SHA256: dd3083a5f8e2dada0bad7e6d9428bf2368862d3bd1a70509ee38105de24bbfa7
+Section: libs
+Priority: optional
+Filename: debs/libtbbmalloc2_2023.1.0-3_armhf.deb
+
+Package: liburcu8t64
+Source: liburcu
+Version: 0.15.7-1
+Installed-Size: 550
+Architecture: armhf
+Replaces: liburcu8
+Depends: libc6 (>= 2.38)
+Breaks: liburcu8 (<< 0.15.7-1)
+Size: 71020
+SHA256: d5520eb929ff2562d219329b50eaee50e064274b02f9d130c73fd1f655054656
+Section: libs
+Priority: optional
+Filename: debs/liburcu8t64_0.15.7-1_armhf.deb
+
+Package: libwireshark-data
+Source: wireshark
+Version: 4.6.9-1
+Installed-Size: 3748
+Architecture: all
+Size: 462564
+SHA256: 0501043deefa9b6a9ed5c229be00ca201ef4ad083d54430e48e6425424272d13
+Section: libs
+Priority: optional
+Filename: debs/libwireshark-data_4.6.9-1_all.deb
+
+Package: libwireshark19
+Source: wireshark (4.6.9-1)
+Version: 4.6.9-1+b1
+Installed-Size: 84866
+Architecture: armhf
+Depends: libbcg729-0 (>= 1.0.0), libbrotli1 (>= 0.6.0), libc6 (>= 2.38), libcares2 (>= 1.11.0~rc1), libfalcosecurity0.23 (>= 0.23.2), libgcc-s1 (>= 3.5), libgcrypt20 (>= 1.12.0), libglib2.0-0t64 (>= 2.76.0), libgnutls30t64 (>= 3.7.3), libk5crypto3 (>= 1.7+dfsg), libkrb5-3 (>= 1.7dfsg), liblua5.4-0 (>= 5.4.6), liblz4-1 (>= 1.8.0), libnghttp2-14 (>= 1.11.0), libnghttp3-9 (>= 0.15.0), libopencore-amrnb0 (>= 0.1.6), libopus0 (>= 1.1), libpcre2-8-0 (>= 10.47), libsbc1 (>= 2.1), libsmi2t64 (>= 0.4.5+dfsg0), libsnappy1v5 (>= 1.3.1), libspandsp2t64 (>= 0.0.6~pre18), libstdc++6 (>= 12), libwiretap16 (>= 4.6.0~rc1), libwsutil17 (>= 4.6.9-1), libxml2-16 (>= 2.14.1), libxxhash0 (>= 0.6.5), libzstd1 (>= 1.5.5), zlib1g (>= 1:1.1.4), libwireshark-data (>= 4.6.9-1)
+Size: 16718360
+SHA256: 191f1b69526c126c15713af4d68af3db77ab45bacd85d184550c04187dc2a48c
+Section: libs
+Priority: optional
+Filename: debs/libwireshark19_4.6.9-1+b1_armhf.deb
+
+Package: libwiretap16
+Source: wireshark (4.6.9-1)
+Version: 4.6.9-1+b1
+Installed-Size: 646
+Architecture: armhf
+Depends: libc6 (>= 2.34), libgcc-s1 (>= 3.5), libglib2.0-0t64 (>= 2.76.0), liblz4-1 (>= 1.9.3), libwsutil17 (>= 4.6.0~rc1), libxml2-16 (>= 2.14.1), libzstd1 (>= 1.5.5), zlib1g (>= 1:1.2.2.4)
+Size: 264808
+SHA256: 998a9eccd1382ad7f92475fe7d83fc464cf98b14d068a720f133ef954fc5188b
+Section: libs
+Priority: optional
+Filename: debs/libwiretap16_4.6.9-1+b1_armhf.deb
+
+Package: libwsutil17
+Source: wireshark (4.6.9-1)
+Version: 4.6.9-1+b1
+Installed-Size: 328
+Architecture: armhf
+Depends: libc6 (>= 2.34), libgcc-s1 (>= 3.5), libgcrypt20 (>= 1.12.0), libglib2.0-0t64 (>= 2.76.0), libgnutls30t64 (>= 3.7.3), libpcre2-8-0 (>= 10.47), libxxhash0 (>= 0.7.0), zlib1g (>= 1:1.1.4)
+Size: 148548
+SHA256: 8f780dc36743c0e9f0a3a5551466adf26c150f5016fe0d4c38c3b310a5a61b74
+Section: libs
+Priority: optional
+Filename: debs/libwsutil17_4.6.9-1+b1_armhf.deb
+
+Package: locales
+Source: glibc
+Version: 2.43-7
+Installed-Size: 15771
+Architecture: all
+Depends: libc-bin (>> 2.43), libc-l10n (>> 2.43), debconf (>= 0.5) | debconf-2.0
+Size: 3913276
+SHA256: 1ea4f7b9b4177e1c0a3b2a7b1fe3d98430e4e55cd7a5ad5ab0b18bf377ca2c1c
+Section: localization
+Priority: standard
+Filename: debs/locales_2.43-7_all.deb
+
+Package: netcat-openbsd
+Version: 1.238-1
+Installed-Size: 128
+Architecture: armhf
+Provides: netcat
+Depends: libbsd0 (>= 0.2.0), libc6 (>= 2.38)
+Size: 36824
+SHA256: 3008268ad69fae05b89f721602b777100420d856f63adbf066911ec1f8fa488d
+Section: net
+Priority: optional
+Filename: debs/netcat-openbsd_1.238-1_armhf.deb
+
+Package: python3-bleak
+Source: bleak
+Version: 3.0.2-2
+Installed-Size: 510
+Architecture: all
+Depends: bluez, python3-dbus-fast, python3-supported-min (>= 3.11.0) | python3-async-timeout, python3-supported-min (>= 3.12.0) | python3-typing-extensions, python3:any
+Breaks: python3-bleak-retry-connector (<< 4.0.0), python3-bluetooth-adapters (<< 2.0.0), python3-habluetooth (<< 4.0.1), python3-home-assistant-bluetooth (<< 1.13.1-4), python3-pykulersky (<< 0.6.0)
+Size: 110640
+SHA256: 4fc7d23b866f6d02abe352a93536a9b7862c00c391126e59c0f807dc4468ab27
+Section: python
+Priority: optional
+Filename: debs/python3-bleak_3.0.2-2_all.deb
+
+Package: python3-dbus-fast
+Source: dbus-fast
+Version: 5.2.0-1
+Installed-Size: 2840
+Architecture: armhf
+Depends: python3 (<< 3.15), python3 (>= 3.14~), python3:any, libc6 (>= 2.4), libjs-sphinxdoc (>= 9.0)
+Size: 616848
+SHA256: 3d7ef6101ea996a97739c38071f31ef612efd5bef1f347494b1b4de884a561aa
+Section: python
+Priority: optional
+Filename: debs/python3-dbus-fast_5.2.0-1_armhf.deb
+
+Package: python3-scapy
+Source: scapy
+Version: 2.7.0+dfsg1-1
+Installed-Size: 9334
+Architecture: all
+Provides: scapy
+Depends: netbase, python3:any
+Size: 2002220
+SHA256: 819c15750ee6056060d5b286f5ef00a469b977acce0fa965e55aa1f617dc7cac
+Section: python
+Priority: optional
+Filename: debs/python3-scapy_2.7.0+dfsg1-1_all.deb
+
+Package: python3-serial
+Source: pyserial
+Version: 3.5-2
+Installed-Size: 458
+Architecture: all
+Depends: python3:any
+Size: 88228
+SHA256: 55adf00b96ef91b1d8ad935d134c341f7c3dd021a5666cd53e75f37144006a51
+Section: python
+Priority: optional
+Filename: debs/python3-serial_3.5-2_all.deb
+
+Package: tcpdump
+Version: 4.99.6-2
+Installed-Size: 942
+Architecture: armhf
+Replaces: apparmor-profiles-extra (<< 1.12~)
+Depends: systemd | systemd-standalone-sysusers | systemd-sysusers, libc6 (>= 2.38), libpcap0.8t64 (>= 1.9.0), libssl3t64 (>= 3.0.0)
+Breaks: apparmor-profiles-extra (<< 1.12~)
+Size: 419300
+SHA256: 221562afc02919e328de35e66556d8a5e20bc18c7d3546dda0d6bc1a58170f8d
+Section: net
+Priority: optional
+Filename: debs/tcpdump_4.99.6-2_armhf.deb
+
+Package: tshark
+Source: wireshark (4.6.9-1)
+Version: 4.6.9-1+b1
+Installed-Size: 347
+Architecture: armhf
+Depends: libc6 (>= 2.34), libgcc-s1 (>= 3.5), libglib2.0-0t64 (>= 2.76.0), libnl-3-200 (>= 3.11.0), libnl-route-3-200 (>= 3.11.0), libpcap0.8t64 (>= 1.5.1), libwireshark19 (>= 4.6.0~rc1), libwiretap16 (>= 4.6.0), libwsutil17 (>= 4.6.0~rc1), wireshark-common (= 4.6.9-1+b1)
+Size: 176736
+SHA256: c20be28c0309e60d699910d94b610754297c8a7c42295f5614cce4f7fe2b3188
+Section: net
+Priority: optional
+Filename: debs/tshark_4.6.9-1+b1_armhf.deb
+
+Package: wireshark-common
+Source: wireshark (4.6.9-1)
+Version: 4.6.9-1+b1
+Installed-Size: 2071
+Architecture: armhf
+Replaces: wireshark (<< 2.0.0~), wireshark-qt (<< 2.0.0~rc3+g841d5e1)
+Depends: libc6 (>= 2.34), libcap2 (>= 1:2.10), libgcc-s1 (>= 3.5), libgcrypt20 (>= 1.12.0), libglib2.0-0t64 (>= 2.76.0), liblz4-1 (>= 1.9.3), libmaxminddb0 (>= 1.0.2), libnl-3-200 (>= 3.11.0), libnl-genl-3-200 (>= 3.11.0), libnl-route-3-200 (>= 3.11.0), libpcap0.8t64 (>= 1.5.1), libpcre2-8-0 (>= 10.47), libspeexdsp1 (>= 1.2.1), libssh-4 (>= 0.8.0), libsystemd0 (>= 246), libwireshark19 (>= 4.6.9-1+b1), libwiretap16 (>= 4.6.9-1+b1), libwsutil17 (>= 4.6.5), libxxhash0 (>= 0.7.0), libzstd1 (>= 1.5.5), zlib1g (>= 1:1.2.2.4), debconf (>= 0.5) | debconf-2.0, debconf, libcap2-bin
+Breaks: wireshark (<< 2.0.0~), wireshark-gtk (<< 3.0.0), wireshark-qt (<< 2.0.0~rc3+g841d5e1)
+Size: 617916
+SHA256: 47d0cde9d7b7554bfcc8bccdd5c6ec638eb2e8af090f18a3b64e120c14342501
+Section: net
+Priority: optional
+Filename: debs/wireshark-common_4.6.9-1+b1_armhf.deb

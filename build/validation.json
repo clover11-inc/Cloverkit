@@ -1,0 +1,22 @@
+{
+  "candidate": "0.1.0-alpha.2",
+  "date": "2026-10-29",
+  "release_tests": {
+    "run": 7,
+    "passed": 6,
+    "skipped_platform_specific": 1
+  },
+  "candidate_tests": {
+    "run": 14,
+    "passed": 13,
+    "skipped_platform_specific": 1
+  },
+  "syntax_and_install_manifest": "passed",
+  "feature_topics": 39,
+  "first_version_image_builder": "completed with all FAT payload hashes verified; upstream bootloader/root filesystem unchanged",
+  "tested_runtime_comparison": "Board programs/services retained; companion withdrawn; first-boot progress text updated.",
+  "hardware_tests_run_during_packaging": false,
+  "hardware_status_reference": "release-notes/CLEAN-CARD-STATUS.md",
+  "standalone_alongside_included": false,
+  "companion_included": false
+}

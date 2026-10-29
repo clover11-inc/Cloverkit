@@ -1,0 +1,350 @@
+#!/usr/bin/env python3
+"""Cloverkit client health: read-only radio observations and bounded active tests."""
+import signal
+import argparse, datetime, json, os, re, shutil, statistics, subprocess, sys, tempfile, threading, time
+from pathlib import Path
+
+os.environ['PATH'] = os.environ.get('PATH', '') + ':/usr/local/sbin:/usr/sbin:/sbin'
+ENV = dict(os.environ, LC_ALL='C')
+LOCK = threading.Lock()
+
+def command(args, timeout=8):
+    try:
+        p = subprocess.run(args, capture_output=True, text=True, timeout=timeout, env=ENV)
+        return p.returncode, p.stdout, p.stderr.strip()
+    except (OSError, subprocess.TimeoutExpired) as e:
+        return 127, '', str(e)
+
+def number(text, pattern):
+    m = re.search(pattern, text, re.M)
+    return float(m.group(1)) if m else None
+
+def radio(iface):
+    verify_external(iface)
+    rc, link, err = command(['iw', 'dev', iface, 'link'])
+    sc, station, se = command(['iw', 'dev', iface, 'station', 'dump'])
+    m = re.search(r'Connected to ([0-9a-f:]+)', link, re.I)
+    out = {'connected': bool(m), 'bssid': m.group(1) if m else None,
+           'ssid': (re.search(r'^\s*SSID: (.*)$', link, re.M).group(1) if re.search(r'^\s*SSID: (.*)$', link, re.M) else None),
+           'signal': number(link, r'^\s*signal:\s*(-?[\d.]+)'),
+           'frequency': number(link, r'^\s*freq:\s*(\d+)'),
+           'tx_rate': number(station or link, r'^\s*tx bitrate:\s*([\d.]+)'),
+           'rx_rate': number(station, r'^\s*rx bitrate:\s*([\d.]+)'),
+           'error': err if rc else (se if sc else None)}
+    for field in ('tx packets', 'tx retries', 'tx failed', 'rx bytes', 'tx bytes'):
+        out[field] = number(station, r'^\s*' + re.escape(field) + r':\s*(\d+)')
+    out['raw_link'], out['raw_station'] = link, station
+    return out
+
+def ping(iface, target):
+    rc, out, err = command(['ping', '-n', '-I', iface, '-c', '10', '-i', '0.3', '-W', '1', target], 16)
+    loss = number(out, r'([\d.]+)% packet loss')
+    m = re.search(r'(?:rtt|round-trip).*?= ([\d.]+)/([\d.]+)/([\d.]+)/([\d.]+)', out)
+    return {'target': target, 'loss': loss, 'avg_ms': float(m.group(2)) if m else None,
+            'max_ms': float(m.group(3)) if m else None, 'mdev_ms': float(m.group(4)) if m else None,
+            'status': 'measured' if loss is not None else 'unavailable', 'error': err or None, 'raw': out}
+
+def route_ok(ip, source, iface):
+    rc, out, err = command(['ip', '-j', '-4', 'route', 'get', ip, 'from', source])
+    try:
+        routes = json.loads(out)
+        return rc == 0 and bool(routes) and routes[0].get('dev') == iface
+    except ValueError:
+        return False
+
+def coverage(samples):
+    values = [s['signal'] for s in samples if s.get('signal') is not None]
+    if not values: return 'UNKNOWN', None
+    avg = statistics.mean(values)
+    return ('STRONG' if avg >= -60 else 'GOOD' if avg >= -67 else 'MARGINAL' if avg >= -75 else 'WEAK'), avg
+
+sys.path.insert(0,'/usr/local/lib/bh-interactive')
+from cloverkit_insights import health_score, verify_external
+
+def executive(data):
+    samples = data['samples']
+    cov, avg = coverage(samples)
+    lines = ['Coverage: ' + cov + (f' ({avg:.0f} dBm avg)' if avg is not None else '')]
+    for key, title in [('gateway', 'Gateway'), ('internet', 'Internet')]:
+        p = data.get(key)
+        if not p: lines.append(title + ': PENDING'); continue
+        if p.get('loss') == 100: lines.append(title + ': NO ICMP REPLY (blocked or unreachable)')
+        elif p.get('loss') is None: lines.append(title + ': UNAVAILABLE')
+        else: lines.append(f"{title}: {p['loss']:.0f}% loss, {p['avg_ms']:.1f} ms avg, {p['mdev_ms']:.1f} ms variation" if p['avg_ms'] is not None else f"{title}: {p['loss']:.0f}% loss")
+    for key in ('download', 'upload'):
+        results = data.get(key, [])
+        valid = [x['mbps'] for x in results if x.get('mbps') is not None]
+        lines.append(key.title() + ': ' + (f'{statistics.median(valid):.1f} Mbps (median, {len(valid)} trial(s))' if valid else ('UNAVAILABLE' if results else 'PENDING')))
+    associated = [s for s in samples if s.get('connected')]
+    aps = {s['bssid'] for s in associated}
+    lost = sum(not s.get('connected') and not s.get('error') for s in samples)
+    if len(aps) > 1: lines.append('AP changed: roaming observed; results span multiple APs')
+    if lost: lines.append(f'Connection: {lost} disconnected sample(s)')
+    gw = data.get('gateway', {})
+    wan = data.get('internet', {})
+    rates = [x['mbps'] for x in data.get('download', []) if x.get('mbps') is not None]
+    conclusion = 'Collecting evidence'
+    if data.get('error'): conclusion = 'Test failed: ' + data['error']
+    if cov == 'WEAK': conclusion = 'Weak coverage observed; test closer to the AP'
+    elif lost: conclusion = 'Connection interruption observed; inspect client/AP logs'
+    elif gw.get('loss') is not None and 0 < gw['loss'] < 100: conclusion = 'Local-path loss observed; check RF/retries and gateway response policy'
+    elif rates and statistics.median(rates) < data['minimum_mbps']:
+        conclusion = 'Throughput below selected target; cause not isolated' if cov in ('STRONG', 'GOOD') else 'Low throughput with marginal/unknown coverage'
+    elif wan.get('loss') is not None and 0 < wan['loss'] < 100:
+        conclusion = 'Internet-path loss observed; compare wired/local tests'
+    elif rates: conclusion = 'Coverage/throughput measured; review stability and local comparison'
+    latest = samples[-1] if samples else {}
+    lines.append('Link TX/RX: ' + '/'.join(f'{latest[k]:.1f}' if latest.get(k) is not None else '?' for k in ('tx_rate','rx_rate')) + ' Mbps (PHY)')
+    for k in ('download', 'upload'):
+        local = data.get('local', {}).get(k, {})
+        if local.get('mbps') is not None: lines.append(f"Local {k}: {local['mbps']:.1f} Mbps")
+    if len(samples) > 1:
+        first, last = samples[0], samples[-1]
+        if first.get('bssid') == last.get('bssid'):
+            counts = []
+            for key in ('tx retries', 'tx failed'):
+                if first.get(key) is not None and last.get(key) is not None and last[key] >= first[key]:
+                    counts.append(f'{key}: +{int(last[key]-first[key])}')
+            if counts: lines.append('Radio counters: ' + ', '.join(counts))
+    lines.append('Assessment: ' + conclusion)
+    score=health_score(data)
+    data['health_score']=score
+    lines.append('Network health: '+(str(score['score'])+'/100' if score['score'] is not None else 'not measured')+' | '+str(score['measured_weight_percent'])+'% of weighted checks measured')
+    lines += ['Finding: '+issue for issue in score['issues']]
+    lines.append('Score omits unmeasured checks; it is a troubleshooting heuristic.')
+    return lines
+
+class Health:
+    def __init__(self, args):
+        self.a = args
+        self.data = {'state': 'RUNNING', 'stage': 'STARTING', 'samples': [], 'minimum_mbps': args.minimum_mbps,
+                     'started': datetime.datetime.now().astimezone().isoformat(), 'checks': {}, 'notes': []}
+        self.stop = threading.Event()
+        self.started = time.monotonic()
+        self.render_time = 0
+    def render(self, force=False):
+        with LOCK:
+            if not force and time.monotonic() - self.render_time < 3: return
+            self.render_time = time.monotonic()
+            lines = executive(self.data)
+            if sys.stdout.isatty(): print('\033[2J\033[H', end='')
+            print(f"WIFI HEALTH | {self.data['state']} | {self.data['stage']} | {int(time.monotonic()-self.started)}s")
+            print(f"Client: {self.data.get('interface', '?')} | SSID: {self.data.get('ssid', '?')}")
+            if self.data.get('error'): print('ERROR: ' + self.data['error'])
+            if self.data.get('waiting_reason'): print('Waiting: ' + self.data['waiting_reason'])
+            print('LIVE EXECUTIVE SUMMARY')
+            print('\n'.join(lines))
+            print('Scope: this BH client; Internet results include upstream/server limits.', flush=True)
+    def stage(self, name):
+        with LOCK: self.data['stage'] = name
+        self.render(True)
+    def sample(self):
+        while not self.stop.is_set():
+            s = radio(self.a.interface); s['elapsed'] = round(time.monotonic()-self.started, 2)
+            with LOCK:
+                self.data['samples'].append(s)
+                if len(self.data['samples']) > 1800: self.data['samples'].pop(0)
+            self.render()
+            self.stop.wait(2)
+    def run_process(self, args, timeout, stdin=None):
+        # Temporary output files avoid pipe deadlock and allow a live sampler while tests run.
+        with tempfile.TemporaryFile() as out, tempfile.TemporaryFile() as err:
+            try:
+                p = subprocess.Popen(args, stdout=out, stderr=err, stdin=stdin, env=ENV)
+            except OSError as e: return 127, '', str(e)
+            deadline = time.monotonic() + timeout
+            try:
+                while p.poll() is None:
+                    if time.monotonic() >= deadline:
+                        p.kill(); p.wait(); break
+                    self.stop.wait(.2)
+                out.seek(0); err.seek(0)
+                return p.returncode, out.read().decode(errors='replace'), err.read().decode(errors='replace')
+            finally:
+                if p.poll() is None: p.kill(); p.wait()
+    def transfer(self, direction, size, resolved):
+        endpoint = 'https://speed.cloudflare.com/__down?bytes=' + str(size) if direction == 'download' else 'https://speed.cloudflare.com/__up'
+        args = ['curl', '-4', '--silent', '--show-error', '--noproxy', '*', '--interface', self.data['source_ip'],
+                '--resolve', 'speed.cloudflare.com:443:' + resolved, '--connect-timeout', '5', '--max-time', '20',
+                '--output', '/dev/null', '--write-out', '%{http_code} %{size_download} %{size_upload} %{time_total} %{speed_download} %{speed_upload}']
+        with tempfile.TemporaryFile() as payload:
+            if direction == 'upload':
+                payload.truncate(size); payload.seek(0)
+                args += ['--header', 'Content-Type: application/octet-stream', '--data-binary', '@-']
+            rc, out, err = self.run_process(args + [endpoint], 23, payload if direction == 'upload' else None)
+        r = {'requested_bytes': size, 'status': 'failed', 'error': err.strip() or None, 'mbps': None}
+        try:
+            http, down, up, elapsed, ds, us = map(float, out.split())
+            actual = down if direction == 'download' else up
+            r.update(http=int(http), bytes=actual, seconds=elapsed)
+            if rc == 0 and 200 <= http < 300 and actual == size:
+                r.update(status='measured', mbps=(ds if direction == 'download' else us)*8/1e6)
+                if elapsed < 1: r['note'] = 'Short trial; startup/server/client overhead can dominate'
+            else: r['error'] = r['error'] or 'Incomplete transfer or non-success HTTP response'
+        except ValueError: r['error'] = r['error'] or 'No valid transfer statistics'
+        with LOCK: self.data.setdefault(direction, []).append(r)
+        self.render(True)
+    def run(self):
+        for name in ('iw', 'ip', 'ping', 'curl'):
+            if not shutil.which(name) and Path('/usr/sbin/' + name).exists(): os.environ['PATH'] += ':/usr/sbin'
+        missing = [n for n in ('iw', 'ip', 'ping', 'curl') if not shutil.which(n)]
+        if missing: raise RuntimeError('Missing dependencies: ' + ', '.join(missing))
+        if not re.fullmatch(r'[A-Za-z0-9_.:-]+', self.a.interface): raise RuntimeError('Invalid interface')
+        if self.a.interface == 'wlan0': raise RuntimeError('wlan0 is protected and cannot be used for testing')
+        self.data['interface'] = self.a.interface
+        while not self.stop.is_set():
+            verify_external(self.a.interface)
+            rc,info,detail=command(['iw','dev',self.a.interface,'info'])
+            if rc:raise RuntimeError('Cannot inspect test adapter: '+detail)
+            mode=re.search(r'^\s*type (\S+)\s*$',info,re.M)
+            if not mode or mode.group(1)!='managed':
+                raise RuntimeError(self.a.interface+' is in '+(mode.group(1) if mode else 'unknown')+' mode; stop capture and recover the external adapter before client health')
+            first = radio(self.a.interface)
+            if first['connected']: break
+            self.data.update(state='RUNNING', stage='WAITING FOR TEST ADAPTER / AP CONNECTION',
+                             waiting_reason=first.get('error') or 'Connect this adapter to the Wi-Fi being tested')
+            self.render(True)
+            self.stop.wait(3)
+        if self.stop.is_set():return
+        self.data.pop('waiting_reason', None)
+        rc, addr, err = command(['ip', '-j', '-4', 'addr', 'show', 'dev', self.a.interface])
+        rows = json.loads(addr or '[]')
+        addresses = [a['local'] for row in rows for a in row.get('addr_info', []) if a.get('scope') == 'global']
+        if not addresses: raise RuntimeError('No IPv4 address on selected Wi-Fi client')
+        self.data.update(interface=self.a.interface, source_ip=addresses[0], ssid=first['ssid'], initial_bssid=first['bssid'])
+        rc, routes, err = command(['ip', '-j', '-4', 'route', 'show', 'default', 'dev', self.a.interface])
+        gateways = [r.get('gateway') for r in json.loads(routes or '[]') if r.get('gateway')]
+        self.data['gateway_ip'] = gateways[0] if gateways else None
+        rc, ownership, detail = command(['nmcli','-g','GENERAL.CONNECTION','device','show',self.a.interface])
+        connection=ownership.strip()
+        rc, method, detail = command(['nmcli','-g','ipv4.method','connection','show',connection]) if connection and connection!='--' else (1,'','Connection method unknown')
+        self.data['checks']['addressing']={'method':method.strip() if rc==0 else 'unknown','note':'Existing connection configuration; no DHCP renewal or interface changes'}
+        self.thread = threading.Thread(target=self.sample, daemon=True); self.thread.start()
+        try:
+            self.stage('SIGNAL BASELINE')
+            for _ in range(self.a.observe): self.stop.wait(1)
+            if gateways:
+                self.stage('GATEWAY LATENCY / LOSS')
+                result = ping(self.a.interface, gateways[0])
+                with LOCK: self.data['gateway'] = result
+            else: self.data['gateway'] = {'status':'unavailable', 'error':'No interface default gateway'}
+            if route_ok('1.1.1.1', addresses[0], self.a.interface):
+                self.stage('INTERNET LATENCY / LOSS')
+                result = ping(self.a.interface, '1.1.1.1')
+                with LOCK: self.data['internet'] = result
+            else: self.data['internet'] = {'status':'unavailable', 'error':'Internet route does not use selected Wi-Fi; VPN/Ethernet may intervene'}
+            if not self.a.no_internet:
+                self.stage('DNS / ENDPOINT CHECK')
+                rc, dns, err = command(['getent', 'ahostsv4', 'speed.cloudflare.com'], 8)
+                ips = list(dict.fromkeys(line.split()[0] for line in dns.splitlines() if line.split()))
+                resolved = next((ip for ip in ips if route_ok(ip, addresses[0], self.a.interface)), None)
+                self.data['checks']['dns'] = {'status':'resolved' if ips else 'failed', 'addresses':ips, 'error':err or None,
+                    'note':'System resolver used; DNS path may differ from Wi-Fi path'}
+                if resolved:
+                    for direction, size in [('download', 10000000), ('upload', 5000000)]:
+                        for trial in range(2):
+                            self.stage(direction.upper() + f' TRIAL {trial+1}/2')
+                            self.transfer(direction, size, resolved)
+                else:
+                    for direction in ('download', 'upload'):
+                        self.data[direction] = [{'status':'skipped', 'mbps':None, 'error':'DNS failed or endpoint route not on selected Wi-Fi'}]
+            else:
+                for direction in ('download', 'upload'): self.data[direction] = [{'status':'skipped', 'mbps':None, 'error':'Disabled by --no-internet'}]
+            if self.a.iperf:
+                if not shutil.which('iperf3'): self.data['local'] = {'error':'iperf3 not installed'}
+                elif not route_ok(self.a.iperf, addresses[0], self.a.interface): self.data['local'] = {'error':'Local server route not on selected Wi-Fi'}
+                else:
+                    self.data['local'] = {}
+                    for direction in ('upload', 'download'):
+                        self.stage('LOCAL IPERF ' + direction.upper())
+                        cmd = ['iperf3','-c',self.a.iperf,'-B',addresses[0],'-t','10','-J'] + (['-R'] if direction == 'download' else [])
+                        rc, out, err = self.run_process(cmd, 20)
+                        try:
+                            result = json.loads(out)
+                            end = result.get('end', {})
+                            received = end.get('sum_received', {})
+                            self.data['local'][direction] = {'mbps':received.get('bits_per_second',0)/1e6 if 'bits_per_second' in received and not rc else None, 'raw':result,'error':result.get('error') or err or None}
+                        except ValueError: self.data['local'][direction] = {'mbps':None,'error':err or out}
+            required = [self.data.get('gateway',{}), self.data.get('internet',{})]
+            incomplete = any(x.get('status') != 'measured' or x.get('loss') == 100 for x in required)
+            if not self.a.no_internet: incomplete |= any(not any(x.get('mbps') is not None for x in self.data.get(k,[])) for k in ('download','upload'))
+            if self.a.iperf: incomplete |= any(self.data.get('local',{}).get(k,{}).get('mbps') is None for k in ('download','upload'))
+            self.data['state'] = 'INCOMPLETE' if incomplete else 'COMPLETE'
+            self.data['stage'] = 'FINISHED'
+        finally:
+            self.stop.set(); self.thread.join(12)
+    def save(self):
+        self.data['finished'] = datetime.datetime.now().astimezone().isoformat()
+        self.data['executive_summary'] = executive(self.data)
+        self.data['notes'] += ['Signal thresholds are troubleshooting heuristics, not a site acceptance standard.',
+            'ICMP loss/latency may reflect ICMP filtering or de-prioritisation.',
+            'Internet throughput is a bounded single-stream HTTP test, not maximum Wi-Fi capacity.',
+            'No active Wi-Fi scan, connection change, monitor mode, or channel change is performed.',
+            'Station counters are driver-dependent; retries are counts, not a universal packet-loss percentage.',
+            'Repeat in the affected area and near the AP; compare the affected client and wired/local results.']
+        folder = Path(self.a.output).expanduser(); folder.mkdir(parents=True, exist_ok=True)
+        stem = folder / ('wifi-health-' + datetime.datetime.now().strftime('%Y%m%d-%H%M%S') + '-' + str(os.getpid()))
+        Path(str(stem)+'.json').write_text(json.dumps(self.data, indent=2))
+        details = '\n'.join(self.data['executive_summary']) + '\n\nDETAILED RESULTS\n' + json.dumps(self.data, indent=2)
+        Path(str(stem)+'.txt').write_text(details)
+        self.render(True)
+        print('Detailed report: ' + str(stem)+'.txt', flush=True)
+
+def main():
+    p = argparse.ArgumentParser(description=__doc__)
+    p.add_argument('--once', action='store_true', help='One test cycle instead of continuous monitoring')
+    p.add_argument('--interval', type=int, default=120, help='Seconds between active test cycles; signal remains live, default 120')
+    p.add_argument('--interface', default='wlan1', help='Dedicated test Wi-Fi client (default wlan1); wlan0 prohibited')
+    p.add_argument('--observe', type=int, default=12, help='Baseline seconds, 5-60')
+    p.add_argument('--no-internet', action='store_true', help='Skip Internet throughput (ping still runs)')
+    p.add_argument('--iperf', help='Optional wired local iperf3 server IPv4 address')
+    p.add_argument('--minimum-mbps', type=float, default=20, help='Your download performance target, not a universal Wi-Fi standard')
+    p.add_argument('--output', default='~/.local/share/cloverkit/wifi-health')
+    a = p.parse_args()
+    if a.interface not in ('wlan1','wlan2'): p.error('wlan0 is protected; use --interface wlan1 or wlan2')
+    if not 5 <= a.observe <= 60: p.error('--observe must be 5-60')
+    if a.interval < 30: p.error('--interval must be at least 30 seconds')
+    if a.minimum_mbps <= 0: p.error('--minimum-mbps must be positive')
+    if a.iperf:
+        import ipaddress
+        try: ipaddress.IPv4Address(a.iperf)
+        except ValueError: p.error('--iperf must be an IPv4 address')
+    signal.signal(signal.SIGTERM, lambda *_: (_ for _ in ()).throw(KeyboardInterrupt()))
+    os.umask(0o077)
+    h = None
+    cycle = 0
+    try:
+        while True:
+            cycle += 1
+            h = Health(a)
+            h.data['cycle'] = cycle
+            try:
+                h.run()
+            except KeyboardInterrupt:
+                raise
+            except Exception as e:
+                h.data.update(state='FAILED', stage='STOPPED', error=str(e))
+                print('ERROR: '+str(e), flush=True)
+            h.save()
+            if a.once or h.data['state'] == 'FAILED': break
+            # Continue radio observations between bounded active-test cycles.
+            h.stop = threading.Event()
+            h.data.update(state='RUNNING', stage='MONITORING; next active cycle in '+str(a.interval)+'s')
+            h.thread = threading.Thread(target=h.sample, daemon=True)
+            h.thread.start()
+            try:
+                deadline = time.monotonic() + a.interval
+                while time.monotonic() < deadline:
+                    h.stop.wait(1)
+            finally:
+                h.stop.set(); h.thread.join(12)
+    except KeyboardInterrupt:
+        if h:
+            h.stop.set()
+            if hasattr(h, 'thread'): h.thread.join(12)
+            h.data.update(state='STOPPED', stage='STOPPED BY USER')
+            h.save()
+        return 0
+    return 0 if h and h.data['state'] == 'COMPLETE' else 2
+
+if __name__ == '__main__': sys.exit(main())

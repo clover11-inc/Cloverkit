@@ -1,0 +1,5 @@
+#!/usr/bin/python3
+import sys
+sys.path.insert(0,'/usr/local/lib/bh-interactive')
+from cloverkit_report import survey_store
+raise SystemExit(survey_store())

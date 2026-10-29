@@ -1,0 +1,62 @@
+#!/bin/bash
+
+IP=/usr/sbin/ip
+
+usable_eth() {
+    for P in /sys/class/net/*; do
+        IF=$(basename "$P")
+
+        [ "$IF" = "lo" ] && continue
+        [ -d "$P/wireless" ] && continue
+
+        case "$IF" in
+            tun*|wg*) continue ;;
+        esac
+
+        [ -e "$P/device" ] || continue
+        [ "$(cat "$P/carrier" 2>/dev/null)" = "1" ] || continue
+
+        "$IP" -4 addr show "$IF" 2>/dev/null |
+            grep -q 'inet ' || continue
+
+        echo "$IF"
+        return 0
+    done
+
+    return 1
+}
+
+usable_wifi() {
+    for P in /sys/class/net/*; do
+        IF=$(basename "$P")
+
+        [ -d "$P/wireless" ] || continue
+
+        "$IP" -4 addr show "$IF" 2>/dev/null |
+            grep -q 'inet ' || continue
+
+        /usr/sbin/iw dev "$IF" link 2>/dev/null |
+            grep -q '^Connected to ' || continue
+
+        echo "$IF"
+        return 0
+    done
+
+    return 1
+}
+
+if [ -n "${1:-}" ]; then
+    IF="$1"
+
+    "$IP" -4 addr show "$IF" 2>/dev/null |
+        grep -q 'inet ' || exit 1
+
+    echo "$IF"
+    exit 0
+fi
+
+# Test traffic deliberately prefers wired.
+usable_eth && exit 0
+usable_wifi && exit 0
+
+exit 1

@@ -1,0 +1,117 @@
+#!/usr/bin/env python3
+
+import json
+import os
+import re
+from pathlib import Path
+
+REPORT = Path("/mnt/security/reports/latest.json")
+SCRIPTS = Path("/mnt/scripts")
+
+
+def safe(value):
+    value = str(value or "")
+    value = re.sub(r"[^A-Za-z0-9._-]+", "-", value)
+    return value.strip("-")
+
+
+def write_script(name, command):
+    path = SCRIPTS / name
+
+    text = f"""#!/bin/bash
+exec {command}
+"""
+
+    path.write_text(text, encoding="utf-8")
+    os.chmod(path, 0o755)
+
+
+
+def cve_rating(value):
+    import math
+    if value is None or isinstance(value,bool): return 'unknown'
+    try: score=float(value)
+    except (TypeError,ValueError): return 'unknown'
+    if not math.isfinite(score) or not 0 <= score <= 10: return 'unknown'
+    return format(score,'.1f').rstrip('0').rstrip('.')
+
+def main():
+    if not REPORT.exists():
+        return 0
+
+    report = json.loads(
+        REPORT.read_text(encoding="utf-8")
+    )
+
+    for old in SCRIPTS.glob("TARGET-SEC-*.sh"):
+        try:
+            old.unlink()
+        except OSError:
+            pass
+
+    for host in report.get("hosts", []):
+        ip = host.get("ip")
+
+        if not ip:
+            continue
+
+        ip_safe = safe(ip.replace(".", "-"))
+
+        findings = host.get("findings", [])
+
+        actionable = [
+            f for f in findings
+            if f.get("severity") in (
+                "CRITICAL",
+                "HIGH",
+                "MEDIUM",
+                "LOW",
+            )
+        ]
+
+        if actionable:
+            write_script(
+                f"TARGET-SEC-HOST-{ip_safe}.sh",
+                f"/usr/local/bin/sec-detail host {ip}",
+            )
+
+        for f in actionable:
+            cve = f.get("cve")
+            code = f.get("code")
+
+            if cve:
+                write_script(
+                    (
+                        f"TARGET-SEC-CVE{cve_rating(f.get('cvss'))}-"
+                        f"{ip_safe}-{safe(cve)}.sh"
+                    ),
+                    (
+                        f"/usr/local/bin/sec-detail "
+                        f"cve {ip} {cve}"
+                    ),
+                )
+
+            elif code:
+                write_script(
+                    (
+                        f"TARGET-SEC-FINDING-"
+                        f"{ip_safe}-{safe(code)}.sh"
+                    ),
+                    (
+                        f"/usr/local/bin/sec-detail "
+                        f"finding {ip} {code}"
+                    ),
+                )
+
+    wrapper = Path("/usr/local/bin/lcd-wrap-targets")
+
+    if wrapper.exists():
+        os.system(
+            "/usr/local/bin/lcd-wrap-targets >/dev/null 2>&1"
+        )
+
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

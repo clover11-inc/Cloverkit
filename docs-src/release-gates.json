@@ -1,0 +1,13 @@
+{
+  "status": "first-version-public-alpha",
+  "fresh_card_builder": true,
+  "host_install_enabled": false,
+  "standalone_alongside_included": false,
+  "unvalidated": [
+    "Vehicle adapter and real vehicle",
+    "6 GHz radio hardware",
+    "Broader optional-service and hardware combinations"
+  ],
+  "tested_board_status": "No confirmed outstanding faults reported by maintainer; see release-notes/CLEAN-CARD-STATUS.md",
+  "companion_included": false
+}

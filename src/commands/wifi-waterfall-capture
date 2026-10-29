@@ -1,0 +1,4 @@
+#!/usr/bin/python3
+import os,sys
+if len(sys.argv)!=2 or sys.argv[1] not in ('general','2.4','5','6'):raise SystemExit('Select general, 2.4, 5 or 6')
+os.execv('/usr/local/bin/wifi-passive-health',['wifi-passive-health','--json','--waterfall-mode',sys.argv[1]])

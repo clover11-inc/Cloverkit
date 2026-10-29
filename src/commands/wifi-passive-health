@@ -1,0 +1,714 @@
+#!/usr/bin/env python3
+"""Automatic passive Wi-Fi observations; no association, credentials or payload decryption."""
+import argparse, collections, datetime, fcntl, json, os, re, signal, statistics, subprocess, sys, threading, time
+from pathlib import Path
+os.environ['PATH'] = '/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin'
+ENV = dict(os.environ, LC_ALL='C')
+FIELDS = ['frame.time_epoch','frame.len','wlan.bssid','wlan.ta','wlan.ra','wlan.fc.type','wlan.fc.subtype','wlan.fc.retry','radiotap.channel.freq','radiotap.dbm_antsignal','radiotap.dbm_antnoise','wlan.ssid','radiotap.datarate','wlan.qbss.cu','wlan.qbss.scount','wlan.fixed.reason_code']
+REQUIRED = set(FIELDS[:8])
+FIELDS += ['wlan.ht.info.chanwidth','wlan.ht.info.secchanoffset','wlan.vht.op.channelwidth','wlan.vht.op.channelcenter0','wlan.vht.op.channelcenter1']
+FIELDS += ['wlan.fc.tods','wlan.fc.fromds','wps.uuid_e','wps.device_name','wps.manufacturer','wps.model_name','wps.serial_number','wlan.ht.info.primarychannel']
+# CLOVERKIT_LIVE_CISCO_AP_NAMES_V1
+FIELDS += ['wlan.cisco.ccx1.name', 'wlan.vs.cisco.apname_v2']
+MAC = re.compile(r'^(?:[0-9a-f]{2}:){5}[0-9a-f]{2}$')
+
+def cmd(args, seconds=10):
+    try:
+        p=subprocess.run(args, capture_output=True, text=True, timeout=seconds, env=ENV)
+        return p.returncode,p.stdout,p.stderr.strip()
+    except (OSError,subprocess.TimeoutExpired) as e: return 127,'',str(e)
+
+def demand(args, seconds=10):
+    rc,out,err=cmd(args, seconds)
+    if rc: raise RuntimeError(' '.join(args)+': '+(err or out))
+    return out
+
+# CLOVER_AP_WIDTH_PARSE_V1
+def value(s):
+    import math
+    try:
+        raw=str(s).split(',')[0].strip()
+        if raw.lower() in ('true','false'):
+            return 1.0 if raw.lower()=='true' else 0.0
+        number=float(int(raw,16)) if raw.lower().startswith(('0x','-0x','+0x')) else float(raw)
+        return number if math.isfinite(number) else None
+    except (ValueError,TypeError,AttributeError):return None
+
+
+def ssid_name(raw):
+    if not raw or raw in ('<MISSING>', '<missing>'): return 'Unknown/hidden'
+    # tshark wlan.ssid is a byte field, emitted as hexadecimal.
+    compact=raw.replace(':','')
+    if len(compact)%2==0 and re.fullmatch(r'[0-9a-fA-F]+',compact):
+        raw=bytes.fromhex(compact).decode('utf-8',errors='replace')
+    return ''.join(c if c.isprintable() else '?' for c in raw)[:64] or 'Unknown/hidden'
+
+def reading(number, unit=''):
+    return 'unavailable' if number is None else str(number)+unit
+
+def advertised_width(d):
+    """Operation IEs only; never use capability bits or capture width as AP width."""
+    ht=value(d.get('wlan.ht.info.chanwidth')); offset=value(d.get('wlan.ht.info.secchanoffset'))
+    base='20 MHz' if offset==0 else '40 MHz' if offset in (1,3) and ht==1 else None
+    vht=value(d.get('wlan.vht.op.channelwidth'))
+    if vht==0 or vht is None: return base
+    if vht==2: return '160 MHz'
+    if vht==3: return '80+80 MHz'
+    if vht==1:
+        s0=value(d.get('wlan.vht.op.channelcenter0')); s1=value(d.get('wlan.vht.op.channelcenter1'))
+        if s1==0: return '80 MHz'
+        if s0 is not None and s1 is not None:
+            if abs(s0-s1)==8: return '160 MHz'
+            if abs(s0-s1)>16: return '80+80 MHz'
+    return None
+
+def unicast(mac):
+    return bool(MAC.fullmatch(mac)) and not (int(mac[:2],16)&1)
+
+def survey(text):
+    result={}
+    for block in re.split(r'Survey data from',text)[1:]:
+        f=re.search(r'frequency:\s*(\d+)',block)
+        if not f: continue
+        row={}
+        for key,pat in [('noise',r'noise:\s*(-?\d+)'),('active',r'channel active time:\s*(\d+)'),('busy',r'channel busy time:\s*(\d+)')]:
+            m=re.search(pat,block)
+            row[key]=int(m.group(1)) if m else None
+        result[int(f.group(1))]=row
+    return result
+
+def busy_delta(before,after):
+    if any(x.get(k) is None for x in (before,after) for k in ('active','busy')): return None
+    active=after['active']-before['active']; busy=after['busy']-before['busy']
+    return 100*busy/active if active>0 and 0<=busy<=active else None
+
+def frequencies(text):
+    return sorted({int(float(m.group(1))) for line in text.splitlines() if '(disabled)' not in line and (m:=re.search(r'\*\s+(\d+(?:\.\d+)?)\s+MHz\s+\[',line))})
+
+def channel_plans(options):
+    """Assign separate bands when capabilities allow; retain single-radio coverage."""
+    if len(options)==1: return {options[0][0]: sorted(set(options[0][1]))}
+    for low,high in (options, options[::-1]):
+        low_plan=sorted({f for f in low[1] if 2400<=f<2500})
+        high_plan=sorted({f for f in high[1] if 4900<=f<7125})
+        if low_plan and high_plan:
+            return {low[0]:low_plan,high[0]:high_plan}
+    # Same-band radios share supported channels without discarding unique ones.
+    a,b=options; shared=sorted(set(a[1]) & set(b[1]))
+    plans={a[0]:sorted(set(a[1])-set(shared) | set(shared[::2])),
+           b[0]:sorted(set(b[1])-set(shared) | set(shared[1::2]))}
+    return {name: plan or sorted(set(freqs)) for name,freqs in options for plan in [plans[name]]}
+
+def waterfall_frequencies(freqs,mode):
+    bounds={'general':(2400,5925),'2.4':(2400,2500),'5':(4900,5925),'6':(5925,7125)}
+    if not mode:return freqs
+    lo,hi=bounds[mode]
+    return [f for f in freqs if lo<=f<hi]
+
+def waterfall_plans(options,mode):
+    # The existing planner splits shared channels and preserves unique channels.
+    return channel_plans(options)
+
+def executive_summary(aps, clients, surveys, frames):
+    measured=[a for a in aps if a['signal_dbm'] is not None]
+    weak=[a for a in measured if a['signal_dbm']<-75]
+    strong=[a for a in measured if a['signal_dbm']>=-67]
+    eligible=[a for a in aps if a['recent_data_frames']>=100 and a['recent_retry_percent'] is not None]
+    retries=[a for a in eligible if a['recent_retry_percent']>=20]
+    busy=[r['busy_percent'] for r in surveys if r['busy_percent'] is not None]
+    noise=[r['noise_dbm'] for r in surveys if r['noise_dbm'] is not None]
+    snr=[a for a in aps if a['snr_db'] is not None and a['snr_db']<20]
+    weak_clients=[c for c in clients if c['signal_dbm'] is not None and c['signal_dbm']<-75]
+    if not frames: verdict='COLLECTING: no decoded traffic yet'
+    elif retries or (busy and max(busy)>=70) or snr: verdict='ATTENTION: delivery/channel warning observed'
+    elif weak and strong: verdict='MIXED COVERAGE: strong and weak signals nearby'
+    elif weak: verdict='WEAK COVERAGE observed at this position'
+    elif measured: verdict='No coverage warning in measured signals'
+    else: verdict='INCONCLUSIVE: traffic seen, signal unavailable'
+    rows=['Assessment: '+verdict]
+    for band,lo,hi in [('2.4 GHz',2400,2500),('5 GHz',4900,5925),('6 GHz',5925,7125)]:
+        group=[a for a in measured if lo<=a['frequency']<hi]
+        if not group: continue
+        signals=[a['signal_dbm'] for a in group]
+        rows.append(f"{band}: {sum(v>=-67 for v in signals)} strong / {sum(v<-75 for v in signals)} weak; {min(signals):.0f} to {max(signals):.0f} dBm")
+    if strong:
+        best=max(strong,key=lambda a:a['signal_dbm'])
+        rows.append(f"Strongest observed: {best['ssid'][:24]} ({best['signal_dbm']:.0f} dBm)")
+    if retries: rows.append(f'Delivery: high captured retries on {len(retries)} AP/channel observations')
+    elif eligible: rows.append(f'Delivery: no high retries in {len(eligible)} sufficiently sampled observations')
+    else: rows.append('Delivery: not enough recent data to assess retries')
+    if weak_clients: rows.append(f'Clients: {len(weak_clients)} weak signals received here; AP reception unknown')
+    rows.append('Channel activity: '+(f'peak reported busy {max(busy):.0f}%; cause unknown' if busy else 'not measured by driver'))
+    rows.append('Noise: '+(f'driver reports {min(noise)} to {max(noise)} dBm' if noise else 'unavailable; interference cannot be ruled out'))
+    rows.append('Actual speed / latency / loss: not verified passively')
+    if not frames: action='wait for a channel sweep; check capture notes if no frames'
+    elif retries or (busy and max(busy)>=70) or snr: action='compare the flagged channels nearby; confirm with AP/client telemetry'
+    elif weak: action='compare readings nearer the complaint location and AP'
+    elif not eligible: action='keep collecting traffic; delivery assessment is incomplete'
+    else: action='if complaints continue, check the affected client and upstream path'
+    rows += ['Scope: all nearby APs, measured at BH; hopping misses traffic.']
+    return rows
+
+# CLOVERKIT_DEVELOPMENT_RADIOS_V1
+DEVELOPMENT_RADIOS = ('wlan1', 'wlan2')
+
+def verify_test_radio(name, expected_phy, root=Path('/sys/class/net')):
+    from cloverkit_radio_identity import verify_usb
+    verify_usb(name,root)
+    if name not in DEVELOPMENT_RADIOS:
+        raise RuntimeError('Only wlan1 and wlan2 may be used for development')
+    protected = root/'wlan0'/'phy80211'
+    physical = root/name/'phy80211'
+    if not protected.exists() or not physical.exists():
+        raise RuntimeError('Cannot verify protected/development radio identity')
+    protected = protected.resolve(strict=True)
+    physical = physical.resolve(strict=True)
+    if physical == protected or physical.name != expected_phy:
+        raise RuntimeError('Radio identity changed or shares wlan0; setup refused')
+    interfaces = [p.name for p in root.iterdir()
+                  if (p/'phy80211').exists() and
+                  (p/'phy80211').resolve(strict=True) == physical]
+    if interfaces != [name]:
+        raise RuntimeError('Development radio has additional interfaces; setup refused')
+
+def test_radios(root=Path('/sys/class/net')):
+    from cloverkit_radio_identity import assert_layout
+    assert_layout(root)
+    protected = root/'wlan0'/'phy80211'
+    if not protected.exists():
+        raise RuntimeError('Cannot identify wlan0 protected radio; setup refused')
+    seen = {protected.resolve(strict=True)}
+    result = []
+    for name in DEVELOPMENT_RADIOS:
+        physical = root/name/'phy80211'
+        if not physical.exists():
+            continue
+        physical = physical.resolve(strict=True)
+        if physical in seen:
+            continue
+        seen.add(physical)
+        result.append((name, physical.name))
+    return result
+
+
+# CLOVER_TSHARK_TARGETED_FIELDS_V1
+def health_supported_fields():
+    """Validate only requested fields against an empty radiotap capture."""
+    import hashlib, struct, tempfile
+    executable=Path('/usr/bin/tshark')
+    st=executable.stat()
+    key=hashlib.sha256(repr((st.st_size,st.st_mtime_ns,FIELDS)).encode()).hexdigest()
+    cache=Path('/var/cache/cloverkit/wifi-health-fields.json')
+    try:
+        saved=json.loads(cache.read_text())
+        supported=saved.get('fields',[])
+        if saved.get('key')==key and isinstance(supported,list) and all(isinstance(f,str) and f in FIELDS for f in supported) and REQUIRED<=set(supported):
+            return set(supported)
+    except (OSError,ValueError,TypeError):pass
+    pending=list(FIELDS)
+    with tempfile.TemporaryDirectory(prefix='clover-fields-') as directory:
+        capture=Path(directory)/'empty.pcap'
+        capture.write_bytes(struct.pack('<IHHIIII',0xa1b2c3d4,2,4,0,0,65535,127))
+        for attempt in range(3):
+            argv=[str(executable),'-n','-r',str(capture),'-T','fields']
+            for field in pending:argv.extend(['-e',field])
+            try:
+                result=subprocess.run(argv,stdout=subprocess.DEVNULL,stderr=subprocess.PIPE,text=True,timeout=60,env=ENV)
+            except subprocess.TimeoutExpired:
+                raise RuntimeError('TShark targeted field check timed out before radio capture started')
+            if result.returncode==0:
+                cache.parent.mkdir(parents=True,exist_ok=True)
+                fd,tmp=tempfile.mkstemp(prefix='.health-fields-',dir=cache.parent)
+                try:
+                    with os.fdopen(fd,'w') as f:
+                        json.dump({'key':key,'fields':pending},f);f.flush();os.fsync(f.fileno())
+                    os.chmod(tmp,0o600);os.replace(tmp,cache)
+                finally:Path(tmp).unlink(missing_ok=True)
+                return set(pending)
+            invalid={line.strip() for line in result.stderr.splitlines() if line.strip() in pending}
+            if not invalid:
+                raise RuntimeError('TShark field check failed: '+result.stderr.strip()[-800:])
+            if invalid & REQUIRED:
+                raise RuntimeError('Missing required tshark fields: '+', '.join(sorted(invalid & REQUIRED)))
+            pending=[f for f in pending if f not in invalid]
+    raise RuntimeError('Unable to validate optional TShark fields')
+
+
+class Monitor:
+    def __init__(self,a):
+        self.a=a; self.stop=threading.Event(); self.lock=threading.RLock(); self.started=time.monotonic()
+        self.aps={}; self.clients={}; self.radios={}; self.notes=[]; self.restores=[]; self.threads=[]
+        self.fields=[]; self.state='STARTING'; self.samples=collections.deque(maxlen=600); self.total=0
+        self.session=datetime.datetime.now().strftime('%Y%m%d-%H%M%S')+'-'+str(os.getpid())
+        self.trend_history={}
+        self.traffic_mix=collections.deque(maxlen=20000)
+        self.channel_visits=collections.deque(maxlen=2000)
+        self.folder=Path(a.output); self.folder.mkdir(parents=True,exist_ok=True)
+        self.ap_inventory={}; self.inventory_signature=None
+        self.reload_inventory()
+    def reload_inventory(self):
+        inventory=self.folder/'ap-inventory.json'
+        signature=(inventory.stat().st_mtime_ns,inventory.stat().st_size) if inventory.exists() else None
+        if signature==self.inventory_signature: return
+        self.inventory_signature=signature; self.ap_inventory={}
+        if signature is not None:
+            try:
+                records=json.loads(inventory.read_text())
+                if not isinstance(records,dict): raise ValueError('expected BSSID mapping object')
+                validated={}
+                for address,record in records.items():
+                    if not re.fullmatch(r'(?:[0-9a-fA-F]{2}:){5}[0-9a-fA-F]{2}',address): raise ValueError('invalid BSSID')
+                    if not isinstance(record,dict) or not isinstance(record.get('id'),str) or not record['id'].strip(): raise ValueError('each BSSID needs a confirmed AP id')
+                    validated[address.lower()]={k:record[k][:120] for k in ('id','name','radio') if isinstance(record.get(k),str)}
+                self.ap_inventory=validated
+            except (OSError,ValueError,TypeError) as e: self.note('AP inventory ignored: '+str(e))
+    def note(self,msg):
+        with self.lock: self.notes.append(msg); self.notes=self.notes[-30:]
+    def ingest(self,line,radio):
+        cells=line.rstrip('\n').split('\t')
+        if len(cells)<8 or len(cells)>len(self.fields): return
+        cells += [''] * (len(self.fields)-len(cells))
+        d=dict(zip(self.fields,cells)); bssid=d.get('wlan.bssid','').lower(); ta=d.get('wlan.ta','').lower(); ra=d.get('wlan.ra','').lower()
+        typ=value(d.get('wlan.fc.type')); sub=value(d.get('wlan.fc.subtype'))
+        freq=value(d.get('radiotap.channel.freq')); sig=value(d.get('radiotap.dbm_antsignal')); noise=value(d.get('radiotap.dbm_antnoise'))
+        now=time.monotonic(); length=value(d.get('frame.len')) or 0; retry=d.get('wlan.fc.retry') in ('1','True','true')
+        with self.lock:
+            self.total+=1
+            self.traffic_mix.append((now,typ,sub,length))
+            r=self.radios[radio]; r['frames']+=1; r['last_frame']=now
+            r['window'].append((now,length))
+            # Scheduling hint only: accept current-channel frames or unlabelled frames.
+            # Late buffered frames labelled for a previous channel do not extend this visit.
+            if freq is None or int(freq)==r.get('frequency'):
+                r['visit_frames']=r.get('visit_frames',0)+1
+            if freq is None:
+                r['frames_without_channel']=r.get('frames_without_channel',0)+1
+                return # Count activity, but never guess a frame's channel during hopping.
+            if noise is not None and -130<=noise<=-20: r.setdefault('noise_window',collections.deque(maxlen=120)).append((now,noise))
+            if not unicast(bssid): return
+            key=(bssid,int(freq))
+            if key not in self.aps:
+                if len(self.aps)>=2000: self.note('AP capacity reached; oldest observations are evicted'); self.aps.pop(min(self.aps,key=lambda k:self.aps[k]['last']))
+                self.aps[key]={'bssid':bssid,'frequency':int(freq),'ssid':'Unknown/hidden','first':now,'last':now,'ap_signal':collections.deque(maxlen=120),'snr':collections.deque(maxlen=120),'data':0,'retry':0,'down':0,'up':0,'events':0,'load':None,'load_time':None,'stations':None,'last_reason':None,'window':collections.deque(maxlen=10000)}
+            ap=self.aps[key]; ap['last']=now
+            if typ==0 and sub in (5,8) and ta==bssid:
+                ap['beacons']=ap.get('beacons',0)+int(sub==8)
+                ap['last_beacon']=now if sub==8 else ap.get('last_beacon')
+                observed_width=advertised_width(d)
+                if observed_width is not None:
+                    ap['advertised_width']=observed_width
+                    ap['width_seen']=now
+                primary=value(d.get('wlan.ht.info.primarychannel'))
+                if primary is not None and primary.is_integer() and 1<=primary<=233:
+                    ap['advertised_primary_channel']=int(primary)
+                    ap['primary_seen']=now
+                device={key:''.join(ch for ch in d.get('wps.'+field,'') if ch.isprintable())[:120] for key,field in [('name','device_name'),('manufacturer','manufacturer'),('model','model_name'),('serial','serial_number')] if d.get('wps.'+field)}
+                uuid=re.sub(r'[:\- ]','',d.get('wps.uuid_e','')).lower()
+                if re.fullmatch(r'[0-9a-f]{32}',uuid) and uuid not in ('0'*32,'f'*32): device['uuid']=uuid
+                if device: ap['advertised_device']=device;ap['device_seen']=now
+
+                if d.get('wlan.ssid'): ap['ssid']=ssid_name(d['wlan.ssid'])
+                load=value(d.get('wlan.qbss.cu')); stations=value(d.get('wlan.qbss.scount'))
+                if load is not None and 0<=load<=255:
+                    ap['load']=round(load*100/255,1); ap['load_time']=now
+                    ap['stations']=int(stations) if stations is not None and 0<=stations<=65535 else None
+            if ta==bssid and sig is not None:
+                ap['ap_signal'].append((now,sig))
+                if noise is not None and -130<=noise<=-20: ap['snr'].append((now,sig-noise))
+            if typ==0 and sub in (10,12):
+                ap['events']+=1; ap['last_reason']=value(d.get('wlan.fixed.reason_code'))
+            if typ!=2: return
+            to_ds=d.get('wlan.fc.tods'); from_ds=d.get('wlan.fc.fromds')
+            # Confirm infrastructure direction using DS bits when the decoder supplies them.
+            if to_ds and from_ds:
+                direction='down' if to_ds in ('0','False','false') and from_ds in ('1','True','true') and ta==bssid else 'up' if to_ds in ('1','True','true') and from_ds in ('0','False','false') and ra==bssid else None
+            else:
+                direction='down' if ta==bssid else 'up' if ra==bssid else None
+            ap['data']+=1; ap['retry']+=int(retry); ap['window'].append((now,length,int(retry),direction))
+            if not direction: return # Ignore ambiguous mesh/WDS attribution.
+            ap[direction]+=1
+            client=ra if direction=='down' else ta
+            if not unicast(client) or client==bssid: return
+            ck=(bssid,client,int(freq))
+            if ck not in self.clients:
+                if len(self.clients)>=5000: self.clients.pop(min(self.clients,key=lambda k:self.clients[k]['last']))
+                self.clients[ck]={'ap':bssid,'client':client,'frequency':int(freq),'last':now,'up':0,'down':0,'retry':0,'signal':collections.deque(maxlen=60),'window':collections.deque(maxlen=10000)}
+            c=self.clients[ck]; c['last']=now; c[direction]+=1; c['retry']+=int(retry)
+            c['window'].append((now,length,int(retry),direction))
+            if direction=='up' and sig is not None: c['signal'].append((now,sig))
+    def capture(self,name):
+        r=self.radios[name]; args=['tshark','-n','-l','-i',r['monitor'],'-s','2048','-T','fields','-E','separator=/t','-E','occurrence=f']
+        for field in self.fields: args+=['-e',field]
+        # stderr is bounded by a drain thread; never leave a full stderr pipe blocking capture.
+        try:
+            p=subprocess.Popen(args,stdout=subprocess.PIPE,stderr=subprocess.PIPE,text=True,bufsize=1,env=ENV)
+            r['process']=p
+            if self.stop.is_set():
+                p.terminate()
+                try:p.wait(3)
+                except subprocess.TimeoutExpired:p.kill();p.wait(3)
+                return
+            def errors():
+                for line in p.stderr:
+                    if line.strip(): r['capture_message']=line.strip()[:240]
+            t=threading.Thread(target=errors,daemon=True); t.start()
+            for line in p.stdout:
+                if self.stop.is_set(): break
+                self.ingest(line,name)
+            if not self.stop.is_set(): r['error']='Capture exited: '+str(p.poll())+' '+r.get('capture_message','')
+        except Exception as e: r['error']=str(e)
+        finally:
+            if r.get('process') and r['process'].poll() is None: r['process'].terminate()
+    def hop(self,name,freqs,index,count):
+        r=self.radios[name]; pos=index; active={}
+        quiet=3; extended=max(10,self.a.dwell)
+        while not self.stop.is_set():
+            freq=freqs[pos%len(freqs)]; pos+=count
+            rc,out,err=cmd(['iw','dev',r['monitor'],'set','freq',str(freq)])
+            if rc: r['tune_error']=err; self.stop.wait(.5); continue
+            with self.lock:
+                r['tune_error']=None; r['frequency']=freq
+                visit=(pos-count-index)//count
+                r['sweep_number']=visit//len(freqs)+1
+                r['sweep_position']=visit%len(freqs)+1
+                r['sweep_channels']=len(freqs)
+                target=self.a.dwell if visit<len(freqs) else extended if active.get(freq,False) else quiet
+                r['sweep_nominal_seconds']=sum(extended if active.get(f,False) else self.a.dwell if visit<len(freqs) else quiet for f in freqs)
+                r['sweep_max_seconds']=len(freqs)*extended
+                r['dwell_target_seconds']=target; r['visit_frames']=0
+                r['dwell_elapsed_seconds']=0
+            start=time.monotonic()
+            with self.lock: r['visit_started']=start
+            info=cmd(['iw','dev',r['monitor'],'info'])[1]
+            width=re.search(r'width:\s*(\d+)\s*MHz',info)
+            with self.lock: r['capture_width_mhz']=int(width.group(1)) if width else None
+            before=survey(cmd(['iw','dev',r['monitor'],'survey','dump'])[1]).get(freq,{})
+            while not self.stop.is_set():
+                elapsed=time.monotonic()-start
+                with self.lock:
+                    if r['visit_frames']>0: target=extended
+                    r['dwell_target_seconds']=target
+                    r['dwell_elapsed_seconds']=round(elapsed,1)
+                if elapsed>=target: break
+                self.stop.wait(min(.5,target-elapsed))
+            duration=time.monotonic()-start
+            with self.lock: active[freq]=r['visit_frames']>0
+            after=survey(cmd(['iw','dev',r['monitor'],'survey','dump'])[1]).get(freq,{})
+            row={'radio':name,'frequency':freq,'noise_dbm':after.get('noise'),'busy_percent':busy_delta(before,after),'observed_seconds':round(duration,2),'time':time.monotonic()}
+            with self.lock:
+                r['survey']=row; self.samples.append(row)
+                self.channel_visits.append((name,freq,start,start+duration,r.get('capture_width_mhz')))
+                r['visit_started']=None
+    def setup(self):
+        if os.geteuid()!=0: raise RuntimeError('Launch via installed wifi-health wrapper (scoped sudo)')
+        from cloverkit_radio_recovery import recover as _recover_saved
+        for name in _recover_saved():self.note('Recovered interrupted session radio: '+name)
+        self.state='DISCOVERING RADIOS'; self.render()
+        candidates=test_radios()
+        if not candidates: raise RuntimeError('No independent test Wi-Fi radio present; plug in USB adapters')
+        self.state="CHECKING CAPTURE FIELDS"; self.render()
+        available=health_supported_fields()
+        if not REQUIRED<=available: raise RuntimeError('Missing required tshark fields: '+', '.join(sorted(REQUIRED-available)))
+        self.fields=[f for f in FIELDS if f in available]
+        for missing in set(FIELDS)-available: self.note('Unsupported capture field: '+missing)
+        options=[]
+        for name,phy in candidates[:2]:
+            info=demand(['iw','phy',phy,'info']); freqs=waterfall_frequencies(frequencies(info),getattr(self.a,'waterfall_mode',None))
+            if not re.search(r'^\s*\* monitor\s*$',info,re.M): self.note(name+': monitor mode not advertised by driver'); continue
+            if not freqs: self.note(name+': no enabled channels for selected mode'); continue
+            # Refuse to disturb an existing monitor/AP/P2P interface or another active capture.
+            interfaces=[p.name for p in Path('/sys/class/net').iterdir() if (p/'phy80211').exists() and (p/'phy80211').resolve().name==phy]
+            if len(interfaces)!=1: self.note(name+': multiple interfaces on radio; skipped'); continue
+            oldinfo=demand(['iw','dev',name,'info'])
+            if not re.search(r'^\s*type managed\s*$',oldinfo,re.M): self.note(name+': not an idle/managed test interface; skipped'); continue
+            # Local radio locking; protected radio was excluded before any mutation.
+            fd=open('/run/lock/cloverkit-passive-'+phy+'.lock','w')
+            try: fcntl.flock(fd,fcntl.LOCK_EX|fcntl.LOCK_NB)
+            except BlockingIOError: fd.close(); self.note(name+': already used by this monitor'); continue
+            managed=cmd(['nmcli','-g','GENERAL.NM-MANAGED','device','show',name])[1].strip()
+            if managed not in ('yes','no'): raise RuntimeError('Cannot determine NetworkManager ownership for '+name)
+            uuid=cmd(['nmcli','-g','GENERAL.CON-UUID','device','show',name])[1].strip()
+            flags=demand(['ip','-j','link','show','dev',name]); was_up='UP' in json.loads(flags)[0].get('flags',[])
+            record={'name':name,'phy':phy,'managed':managed,'uuid':uuid,'was_up':was_up,'fd':fd,'monitor':None,'original_type':'managed','direct_monitor':True}; self.restores.append(record)
+            # Journal before any mutation; the next launch can recover after a forced exit.
+            from cloverkit_radio_recovery import save as _save_radio_state
+            _save_radio_state(self.restores,self.session)
+            # Use the original interface, as the working Packet Scan does.
+            verify_test_radio(name, phy)
+            if managed=='yes': demand(['nmcli','device','set',name,'managed','no'])
+            verify_test_radio(name, phy)
+            demand(['ip','link','set',name,'down'])
+            verify_test_radio(name, phy)
+            demand(['iw','dev',name,'set','type','monitor'])
+            mon=name; record['monitor']=mon
+            verify_test_radio(name, phy)
+            demand(['ip','link','set',mon,'up'])
+            self.radios[name]={'monitor':mon,'frequency':None,'frames':0,'window':collections.deque(maxlen=10000),'process':None}
+            options.append((name,freqs))
+        if not options: raise RuntimeError('No compatible test adapter/enabled channels for selected mode; see notes')
+        plans=waterfall_plans(options,getattr(self.a,'waterfall_mode',None))
+        for i,(name,freqs) in enumerate(options):
+            plan=plans[name]
+            self.radios[name]['channels']=plan
+            self.radios[name]['band']='2.4 GHz' if all(2400<=f<2500 for f in plan) else '5 GHz' if all(4900<=f<5925 for f in plan) else '5/6 GHz' if all(4900<=f<7125 for f in plan) else 'ALL BANDS'
+            for fn,args in [(self.capture,(name,)),(self.hop,(name,plan,0,1))]:
+                t=threading.Thread(target=fn,args=args,daemon=True); self.threads.append(t); t.start()
+        self.state='RUNNING'
+    def snapshot(self):
+        now=time.monotonic()
+        with self.lock:
+            self.reload_inventory()
+            measurement_window=min(300,max(60,max((r.get('sweep_max_seconds',len(r.get('channels',[]))*self.a.dwell)+30 for r in self.radios.values()),default=60)))
+            aps=[]
+            for ap in self.aps.values():
+                signals=[v for t,v in ap['ap_signal'] if now-t<=measurement_window]; snrs=[v for t,v in ap['snr'] if now-t<=measurement_window]; window=[x for x in ap['window'] if now-x[0]<=measurement_window]
+                aps.append({k:v for k,v in ap.items() if k not in ('ap_signal','snr','window','first','last','load','load_time','stations')}|{'ap_reported_busy_percent':ap['load'] if ap['load_time'] is not None and now-ap['load_time']<=measurement_window else None,'ap_reported_stations':ap['stations'] if ap['load_time'] is not None and now-ap['load_time']<=measurement_window else None,'last_seen_seconds':round(now-ap['last'],1),'signal_dbm':round(statistics.mean(signals),1) if signals else None,'min_dbm':min(signals) if signals else None,'max_dbm':max(signals) if signals else None,'signal_samples':len(signals),'snr_db':round(statistics.mean(snrs),1) if snrs else None,'recent_data_frames':len(window),'recent_retry_percent':round(100*sum(x[2] for x in window)/len(window),1) if window else None,'captured_data_bytes_60s':sum(x[1] for x in window)})
+            clients=[]
+            for c in self.clients.values():
+                values=[v for t,v in c['signal'] if now-t<=measurement_window]
+                clients.append({k:v for k,v in c.items() if k not in ('signal','last','window')}|{'last_seen_seconds':round(now-c['last'],1),'signal_dbm':round(statistics.mean(values),1) if values else None})
+                recent_link=[x for x in c.get('window',[]) if now-x[0]<=measurement_window]
+                clients[-1]['directions']={}
+                for direction in ('up','down'):
+                    frames=[x for x in recent_link if x[3]==direction]
+                    retries=sum(x[2] for x in frames)
+                    clients[-1]['directions'][direction]=dict(frames=len(frames),retry_frames=retries,retry_percent=round(100*retries/len(frames),1) if frames else None,last_seen_seconds=round(now-frames[-1][0],1) if frames else None,window_capped=len(c.get('window',[]))==10000)
+                clients[-1].update(signal_samples=len(values),min_dbm=min(values) if values else None,max_dbm=max(values) if values else None,
+                                   signal_last_seen_seconds=round(now-c['signal'][-1][0],1) if c['signal'] else None)
+            for a in aps:
+                inventory=self.ap_inventory.get(a['bssid'],{})
+                a.update(physical_ap_id=inventory.get('id'),physical_ap_name=inventory.get('name'),physical_radio=inventory.get('radio'))
+                raw=self.aps[(a['bssid'],a['frequency'])]
+                a.pop('last_beacon',None); a.pop('width_seen',None)
+                a.pop('device_seen',None)
+                same=[r for r in self.aps.values() if r['bssid']==a['bssid'] and r.get('advertised_device')]
+                source=max(same,key=lambda r:r.get('device_seen',0)) if same else None
+                a['advertised_device']=source['advertised_device'] if source else {}
+                a['device_identity_age_seconds']=round(now-source['device_seen'],1) if source else None
+
+                a['advertised_primary_channel']=raw.get('advertised_primary_channel') if now-raw.get('primary_seen',raw.get('width_seen',0))<=measurement_window else None
+                a['advertised_width']=raw.get('advertised_width') if now-raw.get('width_seen',0)<=measurement_window else None
+                a['beacon_last_seen_seconds']=round(now-raw['last_beacon'],1) if raw.get('last_beacon') is not None else None
+                a['signal_last_seen_seconds']=round(now-raw['ap_signal'][-1][0],1) if raw['ap_signal'] else None
+                a['data_last_seen_seconds']=round(now-raw['window'][-1][0],1) if raw['window'] else None
+            coverage={}
+            visits=list(self.channel_visits)+[(name,r['frequency'],r['visit_started'],now,r.get('capture_width_mhz')) for name,r in self.radios.items() if r.get('visit_started') is not None]
+            coverage_period=max(.001,min(measurement_window,now-self.started))
+            for name,freq,start,end,width in visits:
+                duration=max(0,min(end,now)-max(start,now-measurement_window,self.started))
+                if not duration: continue
+                entry=coverage.setdefault((name,freq),dict(radio=name,frequency=freq,listened_seconds=0,visits=0,capture_width_mhz=width))
+                entry['listened_seconds']+=duration; entry['visits']+=1
+                entry['capture_width_mhz']=width
+            for entry in coverage.values():
+                entry['listening_share_percent']=round(100*entry['listened_seconds']/coverage_period,1)
+                entry['listened_seconds']=round(entry['listened_seconds'],1)
+                entry['window_seconds']=round(coverage_period,1)
+            rows=[x for x in self.samples if now-x['time']<=measurement_window]
+            summary=executive_summary(aps,clients,rows,self.total)
+            recent=[x for r in self.radios.values() for x in r['window'] if now-x[0]<=60]
+            period=max(1,min(60,now-self.started))
+            data_recent=[x for ap in self.aps.values() for x in ap['window'] if now-x[0]<=60]
+            activity={'frames_per_second':round(len(recent)/period,1),'kb_per_second':round(sum(x[1] for x in recent)/period/1000,1),'down_frames_60s':sum(x[3]=='down' for x in data_recent),'up_frames_60s':sum(x[3]=='up' for x in data_recent),'window_seconds':round(period,1),'rate_scope':'captured activity; may count overlap on two radios'}
+            mix=[entry for entry in self.traffic_mix if now-entry[0]<=60]
+            counts=collections.Counter()
+            for _,typ,sub,_ in mix:
+                counts['data' if typ==2 else 'management' if typ==0 else 'control' if typ==1 else 'other']+=1
+                if typ==0:
+                    category='beacons' if sub==8 else 'probes' if sub in (4,5) else 'association' if sub in (0,1,2,3) else 'authentication' if sub==11 else 'disconnects' if sub in (10,12) else None
+                    if category: counts[category]+=1
+                elif typ==1 and sub in (11,12,13): counts[{11:'RTS',12:'CTS',13:'ACK'}[sub]]+=1
+            activity.update(frame_types_60s=dict(counts),mix_window_capped=len(self.traffic_mix)==self.traffic_mix.maxlen)
+            radios={name:{k:v for k,v in r.items() if k not in ('process','window','noise_window','last_frame')} | {'packet_noise_dbm':round(statistics.mean(ns),1) if (ns:=[v for t,v in r.get('noise_window',[]) if now-t<=60]) else None,'last_frame_seconds':round(now-r['last_frame'],1) if r.get('last_frame') is not None else None} for name,r in self.radios.items()}
+            trends=self.trends(now,aps,clients,rows)
+            for name in radios: radios[name].pop('visit_started',None)
+            activity['channel_coverage']=list(coverage.values())
+            return {'schema':1,'build':'health-24','measurement_window_seconds':measurement_window,'trends':trends,'activity':activity,'session':self.session,'state':self.state,'elapsed_seconds':round(now-self.started,1),'updated_at':time.time(),'frames_observed':self.total,'summary':summary,'radios':radios,'aps':sorted(aps,key=lambda a:a['last_seen_seconds']),'clients':sorted(clients,key=lambda a:a['last_seen_seconds']),'channel_surveys':rows,'notes':self.notes,'limits':['RSSI is measured at this device, not at the client','Retry percentage uses captured data frames only; no inferred packet loss','Bytes are captured activity, not achievable transfer rate','Noise/busy fields are optional; unsupported is not zero','SNR uses same-frame radiotap signal/noise only','Channel hopping misses traffic; all-channel continuous coverage is impossible','Heuristic thresholds: strong >=-67 dBm, weak <-75 dBm, retries >=20% with >=100 frames, busy >=70%, SNR <20 dB','No packet payload files are stored; frame metadata/identifiers are retained','Configured 20MHz observation may miss wider-channel traffic; modern PHY decoding depends on adapter','SSID/BSSID/client MAC are observations, not authenticated identities']}
+    def trends(self,now,aps,clients,surveys):
+        # Compare the same source/metric only. Re-rendering old observations adds no evidence.
+        self.trend_history={key:series for key,series in self.trend_history.items() if series[-1][0]>=now-300}
+        metadata={}
+        def observe(key,label,metric,value,observed,direction,change,bad):
+            if value is None or observed is None or observed<now-60: return
+            metadata[key]=(label,metric,direction,change,bad)
+            if key not in self.trend_history:
+                if len(self.trend_history)>=5000: return
+                self.trend_history[key]=collections.deque(maxlen=30)
+            series=self.trend_history[key]
+            while series and series[0][0]<now-300: series.popleft()
+            if not series or observed-series[-1][0]>=10: series.append((observed,value))
+        for a in aps:
+            raw=self.aps[(a['bssid'],a['frequency'])]; identity=(a['bssid'],a['frequency'])
+            label=a['ssid']; signal_time=raw['ap_signal'][-1][0] if raw['ap_signal'] else None
+            snr_time=raw['snr'][-1][0] if raw['snr'] else None
+            data_time=raw['window'][-1][0] if raw['window'] else None
+            observe(identity+('signal',),label,'AP signal',a['signal_dbm'],signal_time,1,5,lambda v:v<-75)
+            observe(identity+('snr',),label,'SNR',a['snr_db'],snr_time,1,5,lambda v:v<20)
+            if a['recent_data_frames']>=100:
+                observe(identity+('retries',),label,'retries',a['recent_retry_percent'],data_time,-1,10,lambda v:v>=20)
+            observe(identity+('load',),label,'AP load',a['ap_reported_busy_percent'],raw['load_time'],-1,15,lambda v:v>=70)
+        for c in clients:
+            identity=(c['ap'],c['client'],c['frequency']); raw=self.clients[identity]
+            observe(identity+('signal',),c['client'],'client signal',c['signal_dbm'],raw['signal'][-1][0] if raw['signal'] else None,1,5,lambda v:v<-75)
+            for direction,x in c.get('directions',{}).items():
+                if x['frames']>=100:
+                    observed=now-x['last_seen_seconds'] if x['last_seen_seconds'] is not None else None
+                    observe(identity+('link-retries',direction),c['client'],'link retries',x['retry_percent'],observed,-1,10,lambda v:v>=20)
+        for s in sorted(surveys,key=lambda s:s['time']):
+            identity=(s['radio'],s['frequency']); label=str(s['frequency'])+' MHz'
+            observe(identity+('busy',),label,'channel load',s['busy_percent'],s['time'],-1,15,lambda v:v>=70)
+            observe(identity+('noise',),label,'noise',s['noise_dbm'],s['time'],-1,5,lambda v:False)
+        result=[]
+        for key,(label,metric,direction,change,bad) in metadata.items():
+            series=self.trend_history.get(key,[])
+            if len(series)<3 or series[-1][0]-series[0][0]<30 or series[-1][0]<now-60: continue
+            mid=len(series)//2
+            delta=statistics.median(v for _,v in list(series)[mid:])-statistics.median(v for _,v in list(series)[:mid])
+            quality=delta*direction
+            status='WORSENING' if quality<=-change else 'IMPROVING' if quality>=change else 'PERSISTENT' if series[-1][0]-series[0][0]>=60 and bad(series[-1][1]) and sum(bad(v) for _,v in series)/len(series)>=.8 else 'STABLE'
+            result.append({'status':status,'metric':metric,'source':label,'identity':list(key),'delta':round(delta,1),'samples':len(series),'span_seconds':round(series[-1][0]-series[0][0])})
+            result[-1].update(early_median=round(statistics.median(v for _,v in list(series)[:mid]),1),
+                              late_median=round(statistics.median(v for _,v in list(series)[mid:]),1),
+                              change_threshold=change,higher_is_better=direction==1,
+                              warning_readings=sum(bad(v) for _,v in series),last_reading_warning=bad(series[-1][1]),
+                              readings=[dict(age_seconds=round(now-t,1),value=round(v,1),warning=bad(v)) for t,v in series])
+        return sorted(result,key=lambda r:({'WORSENING':0,'PERSISTENT':1,'IMPROVING':2,'STABLE':3}[r['status']],r['metric']))
+    def render(self):
+        d=self.snapshot(); tmp=self.folder/('latest-'+self.session+'.tmp'); latest=self.folder/'latest.json'
+        tmp.write_text(json.dumps(d,indent=2))
+        os.chown(tmp,int(os.environ.get('SUDO_UID','0')),-1)
+        os.replace(tmp,latest)
+        if self.a.json: print('WIFI_HEALTH_JSON '+json.dumps(d,separators=(',',':')),flush=True); return
+        if sys.stdout.isatty(): print('\033[2J\033[H',end='')
+        print(f"PASSIVE WIFI HEALTH | {d['state']} | {d['elapsed_seconds']:.0f}s | {d['frames_observed']} frames")
+        print('LIVE EXECUTIVE SUMMARY\n'+'\n'.join(d['summary']))
+        for name,r in d['radios'].items(): print(f"{name}: {reading(r.get('frequency'), ' MHz')} | {r['frames']} frames | {r.get('error') or r.get('tune_error') or 'listening/hopping'}")
+        print('Detailed AP/client observations saved in latest.json')
+        for note in d['notes'][-3:]: print('NOTE: '+note)
+        print('Ctrl+C / Stop ends monitoring; wlan0 radio protected.',flush=True)
+    def cleanup(self):
+        # CLOVERKIT_VERIFIED_RADIO_CLEANUP_V1
+        self.stop.set()
+        failures=[]
+        def attempt(args,seconds=10):
+            try:
+                rc,out,err=cmd(args,seconds)
+                if rc: return False,err or out or 'exit '+str(rc)
+                return True,out
+            except Exception as e:return False,str(e)
+        for r in self.radios.values():
+            p=r.get('process')
+            if p and p.poll() is None:
+                try:
+                    p.terminate()
+                    try:p.wait(3)
+                    except subprocess.TimeoutExpired:p.kill();p.wait(3)
+                except Exception as e:failures.append('Capture stop: '+str(e))
+        for t in self.threads:
+            try:t.join(40)
+            except Exception as e:failures.append('Worker stop: '+str(e))
+        if any(t.is_alive() for t in self.threads):
+            self.state='FAILED'
+            self.note('CLEANUP FAILED: worker still active; refusing concurrent radio restoration')
+            print('Wi-Fi cleanup needs attention: worker still active',file=sys.stderr,flush=True)
+            return
+        for r in reversed(self.restores):
+            name=r['name']
+            try:
+                root=Path('/sys/class/net')
+                protected=root/'wlan0'/'phy80211'
+                physical=root/name/'phy80211'
+                if name not in DEVELOPMENT_RADIOS or not protected.exists() or not physical.exists() or physical.resolve()==protected.resolve() or physical.resolve().name!=r['phy']:
+                    raise RuntimeError('Radio identity check failed; restoration refused for '+name)
+                mode_ok=False
+                for retry in range(3):
+                    down,detail=attempt(['ip','link','set',name,'down'])
+                    if down:
+                        if r.get('direct_monitor'):
+                            changed,detail=attempt(['iw','dev',name,'set','type',r['original_type']])
+                        elif r.get('monitor'):
+                            changed,detail=attempt(['iw','dev',r['monitor'],'del'])
+                        else:changed=True
+                        if changed:
+                            checked,info=attempt(['iw','dev',name,'info'])
+                            if checked and re.search(r'^\s*type '+re.escape(r.get('original_type','managed'))+r'\s*$',info,re.M):
+                                mode_ok=True;break
+                            detail='interface mode verification failed'
+                    if retry<2:time.sleep(.3)
+                if not mode_ok:raise RuntimeError('Restore '+name+': '+str(detail))
+                ok,detail=attempt(['ip','link','set',name,'up' if r['was_up'] else 'down'])
+                if not ok:failures.append('Restore '+name+' link state: '+str(detail))
+                # Restore both yes and no explicitly; original ownership matters.
+                ok,detail=attempt(['nmcli','device','set',name,'managed',r['managed']])
+                if not ok:failures.append('Restore '+name+' NetworkManager: '+str(detail))
+                if r['managed']=='yes' and re.fullmatch(r'[0-9a-fA-F-]{36}',r['uuid']):
+                    ok,detail=attempt(['nmcli','connection','up','uuid',r['uuid'],'ifname',name],20)
+                    if not ok:failures.append('Restore '+name+' connection: '+str(detail))
+                # Check again after link/NetworkManager restoration, before clearing recovery state.
+                verify_test_radio(name,r['phy'])
+                ok,info=attempt(['iw','dev',name,'info'])
+                if not ok or not re.search(r'^\s*type managed\s*$',info,re.M):
+                    failures.append('Final mode check failed for '+name+'; recovery journal retained')
+                ok,ownership=attempt(['nmcli','-g','GENERAL.NM-MANAGED','device','show',name])
+                if not ok or ownership.strip()!=r['managed']:
+                    failures.append('Final NetworkManager ownership check failed for '+name+'; recovery journal retained')
+            except Exception as e:failures.append(str(e))
+            finally:
+                try:r['fd'].close()
+                except Exception as e:failures.append('Radio lock close: '+str(e))
+        if failures:
+            self.state='FAILED'
+            for detail in failures:self.note('CLEANUP FAILED: '+detail)
+            print('Wi-Fi cleanup needs attention: '+'; '.join(failures),file=sys.stderr,flush=True)
+        else:
+            from cloverkit_radio_recovery import clear as _clear_radio_state
+            _clear_radio_state(self.session)
+            self.note('Cleanup verified: owned test interfaces restored; wlan0 untouched.')
+
+    def run(self):
+        try:
+            self.setup()
+            while not self.stop.wait(1):
+                self.render()
+                if self.radios and all(r.get('error') for r in self.radios.values()): raise RuntimeError('All capture streams failed')
+        except KeyboardInterrupt: self.state='STOPPED'
+        except Exception as e: self.state='FAILED'; self.note(str(e))
+        finally:
+            # A second Ctrl+C/Stop must not interrupt restoration or report writing.
+            handlers={sig:signal.signal(sig,signal.SIG_IGN) for sig in (signal.SIGINT,signal.SIGTERM)}
+            try:
+                if not self.a.json: print('Stopping: restoring test adapters and saving report; please wait...',flush=True)
+                self.cleanup(); self.render()
+                final=self.folder/('wifi-passive-'+self.session+'.json')
+                final.write_text(json.dumps(self.snapshot(),indent=2))
+                os.chown(final,int(os.environ.get('SUDO_UID','0')),-1)
+            finally:
+                for sig,handler in handlers.items(): signal.signal(sig,handler)
+        return 0 if self.state=='STOPPED' else 2
+
+def main():
+    p=argparse.ArgumentParser(description=__doc__); p.add_argument('--json',action='store_true'); p.add_argument('--dwell',type=int,default=5); p.add_argument('--output',default='/var/lib/cloverkit/wifi-passive-health')
+    p.add_argument('--waterfall-mode',choices=['general','2.4','5','6'])
+    a=p.parse_args()
+    a.json = a.json or not sys.stdout.isatty() # Structured stream to the panel; scoped sudo needs no extra arguments.
+    if not 3<=a.dwell<=30: p.error('--dwell must be 3-30 seconds')
+    os.umask(0o077); signal.signal(signal.SIGTERM,lambda *_: (_ for _ in ()).throw(KeyboardInterrupt()))
+    m=Monitor(a)
+    # Single process owns the global snapshot and automatic radio schedule.
+    fd=open('/run/lock/cloverkit-passive-health.lock','w')
+    try: fcntl.flock(fd,fcntl.LOCK_EX|fcntl.LOCK_NB)
+    except BlockingIOError: print('Wi-Fi Health is already running',flush=True); return 2
+    return m.run()
+
+# WIFI_ENGINEER_EVIDENCE_V1
+import sys as _engineer_sys
+_engineer_sys.path.insert(0,'/usr/local/lib/bh-interactive')
+from wifi_health_engineer import install_backend as _install_evidence
+_install_evidence(Monitor)
+# CLOVERKIT_ROADMAP_V1
+from cloverkit_wireless import EXTRA_FIELDS, install_backend as _install_roadmap
+FIELDS += [field for field in EXTRA_FIELDS if field not in FIELDS]
+_install_roadmap(Monitor)
+from cloverkit_wifi_waterfall import install_backend as _install_waterfall_samples
+_install_waterfall_samples(Monitor)
+if __name__=='__main__': sys.exit(main())

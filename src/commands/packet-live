@@ -1,0 +1,835 @@
+#!/usr/bin/env python3
+import sys as _identity_sys
+_identity_sys.path.insert(0,'/usr/local/lib/bh-interactive')
+from cloverkit_radio_identity import assert_layout as _assert_radio_layout
+_assert_radio_layout()
+
+import json
+import os
+import queue
+import re
+import shutil
+import signal
+import subprocess
+import sys
+import threading
+import time
+from collections import Counter, defaultdict
+from datetime import datetime
+
+IW = "/usr/sbin/iw"
+IP = "/usr/sbin/ip"
+TSHARK = "/usr/bin/tshark"
+DUMPCAP = "/usr/bin/dumpcap"
+
+CHANNELS = [
+    1,6,11,
+    36,40,44,48,
+    52,56,60,64,
+    100,104,108,112,116,
+    132,136,140,
+    149,153,157,161,
+]
+
+MODE = sys.argv[1] if len(sys.argv) > 1 else "probes"
+
+try:
+    DURATION = int(sys.argv[2]) if len(sys.argv) > 2 else 60
+except Exception:
+    DURATION = 60
+
+DURATION = max(10, min(DURATION, 300))
+
+VALID = {
+    "probes",
+    "deauth",
+    "eapol",
+    "stations",
+    "raw",
+}
+
+if MODE not in VALID:
+    print("ERROR:INVALID MODE")
+    raise SystemExit(2)
+
+
+def emit(data):
+    data["mode"] = MODE
+    print(
+        "PACKET_LIVE_JSON "
+        + json.dumps(data, separators=(",", ":")),
+        flush=True,
+    )
+
+
+def run(*args):
+    return subprocess.run(
+        args,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+    )
+
+
+def choose_interface():
+    for name in sorted(os.listdir("/sys/class/net")):
+        if not name.startswith("wlan"):
+            continue
+
+        if name == "wlan0":
+            continue
+
+        if os.path.isdir(
+            f"/sys/class/net/{name}/wireless"
+        ):
+            return name
+
+    return None
+
+
+def mac(value):
+    value = str(value or "").strip().upper()
+
+    if re.fullmatch(
+        r"(?:[0-9A-F]{2}:){5}[0-9A-F]{2}",
+        value
+    ):
+        return value
+
+    return ""
+
+
+def multicast(addr):
+    try:
+        return bool(
+            int(addr.split(":")[0], 16) & 1
+        )
+    except Exception:
+        return True
+
+
+def decode_ssid(value):
+    value = str(value or "").strip()
+
+    if not value:
+        return "<broadcast>"
+
+    # wlan.ssid may arrive as colon-delimited hex.
+    compact = value.replace(":", "")
+
+    if (
+        len(compact) % 2 == 0
+        and re.fullmatch(r"[0-9A-Fa-f]+", compact)
+    ):
+        try:
+            out = bytes.fromhex(compact).decode(
+                "utf-8",
+                errors="replace",
+            )
+
+            return out or "<broadcast>"
+
+        except Exception:
+            pass
+
+    return value
+
+
+interface = choose_interface()
+
+if not interface:
+    print("ERROR:NO EXT WIFI")
+    raise SystemExit(1)
+
+if interface == "wlan0":
+    print("ERROR:WLAN0 BLOCKED")
+    raise SystemExit(1)
+
+if os.geteuid() != 0:
+    os.execvp(
+        "sudo",
+        [
+            "sudo",
+            "-n",
+            "/usr/local/bin/packet-live",
+            MODE,
+            str(DURATION),
+        ],
+    )
+
+
+capture = None
+raw_capture = None
+stop_reader = threading.Event()
+
+
+def restore():
+
+    global capture, raw_capture
+
+    stop_reader.set()
+
+    for proc in (capture, raw_capture):
+        if proc is None:
+            continue
+
+        try:
+            proc.terminate()
+        except Exception:
+            pass
+
+        try:
+            proc.wait(timeout=2)
+        except Exception:
+            try:
+                proc.kill()
+            except Exception:
+                pass
+
+    run(IP, "link", "set", interface, "down")
+    run(IW, "dev", interface, "set", "type", "managed")
+    run(IP, "link", "set", interface, "up")
+
+    if shutil.which("nmcli"):
+        run(
+            "nmcli",
+            "device",
+            "set",
+            interface,
+            "managed",
+            "yes",
+        )
+
+
+def sig_handler(sig, frame):
+    restore()
+    raise SystemExit(128 + sig)
+
+
+signal.signal(signal.SIGTERM, sig_handler)
+signal.signal(signal.SIGINT, sig_handler)
+
+
+def prepare():
+
+    if shutil.which("nmcli"):
+        run(
+            "nmcli",
+            "device",
+            "set",
+            interface,
+            "managed",
+            "no",
+        )
+
+    run(IP, "link", "set", interface, "down")
+
+    if run(
+        IW,
+        "dev",
+        interface,
+        "set",
+        "type",
+        "monitor",
+    ).returncode != 0:
+
+        raise RuntimeError("MONITOR MODE FAILED")
+
+    run(IP, "link", "set", interface, "up")
+
+
+# ------------------------------------------------------------
+# MODE-SPECIFIC TSHARK STREAM
+# ------------------------------------------------------------
+
+def command():
+
+    common = [
+        TSHARK,
+        "-l",
+        "-n",
+        "-i",
+        interface,
+        "-T",
+        "fields",
+        "-E",
+        "separator=\t",
+        "-E",
+        "occurrence=f",
+    ]
+
+    if MODE == "probes":
+
+        return common + [
+            "-Y",
+            "wlan.fc.type_subtype == 4",
+            "-e", "wlan.sa",
+            "-e", "wlan.ssid",
+            "-e", "wlan_radio.channel",
+            "-e", "radiotap.dbm_antsignal",
+        ]
+
+    if MODE == "deauth":
+
+        return common + [
+            "-Y",
+            "wlan.fc.type_subtype == 12 || "
+            "wlan.fc.type_subtype == 10",
+            "-e", "wlan.fc.type_subtype",
+            "-e", "wlan.sa",
+            "-e", "wlan.da",
+            "-e", "wlan.bssid",
+            "-e", "wlan.fixed.reason_code",
+            "-e", "wlan_radio.channel",
+            "-e", "radiotap.dbm_antsignal",
+        ]
+
+    if MODE == "eapol":
+
+        return common + [
+            "-Y",
+            "eapol || wlan.rsn.ie.pmkid || wlan.pmkid.akms",
+            "-e", "wlan.sa",
+            "-e", "wlan.da",
+            "-e", "wlan.bssid",
+            "-e", "eapol.type",
+            "-e", "wlan.rsn.ie.pmkid",
+            "-e", "wlan.pmkid.akms",
+            "-e", "wlan_radio.channel",
+            "-e", "radiotap.dbm_antsignal",
+        ]
+
+    if MODE == "stations":
+
+        return common + [
+            "-Y",
+            "wlan.fc.type == 2 && wlan.sa && wlan.bssid",
+            "-e", "wlan.sa",
+            "-e", "wlan.da",
+            "-e", "wlan.bssid",
+            "-e", "wlan_radio.channel",
+            "-e", "radiotap.dbm_antsignal",
+        ]
+
+    # RAW gets a lightweight parallel activity stream.
+    return common + [
+        "-e", "wlan.fc.type",
+        "-e", "wlan_radio.channel",
+    ]
+
+
+# ------------------------------------------------------------
+# STATE
+# ------------------------------------------------------------
+
+frames = 0
+channels = Counter()
+
+probe_counts = Counter()
+probe_station_ssids = defaultdict(Counter)
+probe_rssi = {}
+
+deauth_rows = Counter()
+deauth_rssi = {}
+deauth_count = 0
+disassoc_count = 0
+
+eapol_pairs = Counter()
+eapol_pmkid_pairs = set()
+eapol_count = 0
+eapol_rssi = {}
+
+station_frames = Counter()
+station_bssid = Counter()
+station_channel = {}
+station_rssi = {}
+
+raw_path = ""
+raw_start_size = 0
+
+
+def process(fields):
+
+    global frames
+    global deauth_count, disassoc_count
+    global eapol_count
+
+    frames += 1
+
+    if MODE == "probes":
+
+        while len(fields) < 4:
+            fields.append("")
+
+        sta = mac(fields[0])
+        ssid = decode_ssid(fields[1])
+        ch = fields[2].strip()
+        rssi = fields[3].split(",")[0].strip()
+
+        if not sta:
+            return
+
+        probe_counts[(sta, ssid)] += 1
+        probe_station_ssids[sta][ssid] += 1
+
+        if ch:
+            channels[ch] += 1
+
+        if rssi:
+            try:
+                probe_rssi[sta] = int(rssi)
+            except Exception:
+                pass
+
+        return
+
+
+    if MODE == "deauth":
+
+        while len(fields) < 7:
+            fields.append("")
+
+        subtype = fields[0].strip()
+        src = mac(fields[1])
+        dst = mac(fields[2])
+        bssid = mac(fields[3])
+        reason = fields[4].strip() or "-"
+        ch = fields[5].strip()
+        rssi = fields[6].split(",")[0].strip()
+
+        kind = (
+            "DEAUTH"
+            if subtype in ("12", "0x000c", "0x0c")
+            else "DISASSOC"
+        )
+
+        if kind == "DEAUTH":
+            deauth_count += 1
+        else:
+            disassoc_count += 1
+
+        deauth_rows[
+            (kind, src, dst, bssid, reason)
+        ] += 1
+
+        if ch:
+            channels[ch] += 1
+
+        if src and rssi:
+            try:
+                deauth_rssi[src] = int(rssi)
+            except Exception:
+                pass
+
+        return
+
+
+    if MODE == "eapol":
+
+        while len(fields) < 8:
+            fields.append("")
+
+        src = mac(fields[0])
+        dst = mac(fields[1])
+        bssid = mac(fields[2])
+
+        pmkid_a = fields[4].strip()
+        pmkid_b = fields[5].strip()
+
+        ch = fields[6].strip()
+        rssi = fields[7].split(",")[0].strip()
+
+        eapol_count += 1
+
+        pair = (
+            bssid or src,
+            dst if dst != bssid else src,
+        )
+
+        eapol_pairs[pair] += 1
+
+        if pmkid_a or pmkid_b:
+            eapol_pmkid_pairs.add(pair)
+
+        if ch:
+            channels[ch] += 1
+
+        if src and rssi:
+            try:
+                eapol_rssi[src] = int(rssi)
+            except Exception:
+                pass
+
+        return
+
+
+    if MODE == "stations":
+
+        while len(fields) < 5:
+            fields.append("")
+
+        src = mac(fields[0])
+        dst = mac(fields[1])
+        bssid = mac(fields[2])
+        ch = fields[3].strip()
+        rssi = fields[4].split(",")[0].strip()
+
+        # For a data frame, whichever endpoint is not the BSSID
+        # is the candidate station.
+        sta = ""
+
+        if src and src != bssid and not multicast(src):
+            sta = src
+
+        elif dst and dst != bssid and not multicast(dst):
+            sta = dst
+
+        if not sta:
+            return
+
+        station_frames[sta] += 1
+
+        if bssid:
+            station_bssid[(sta, bssid)] += 1
+
+        if ch:
+            channels[ch] += 1
+            station_channel[sta] = ch
+
+        if rssi:
+            try:
+                station_rssi[sta] = int(rssi)
+            except Exception:
+                pass
+
+        return
+
+
+    # RAW lightweight activity stream.
+    while len(fields) < 2:
+        fields.append("")
+
+    ch = fields[1].strip()
+
+    if ch:
+        channels[ch] += 1
+
+
+def snapshot(state, elapsed, remaining, rate):
+
+    base = {
+        "state": state,
+        "interface": interface,
+        "duration": DURATION,
+        "elapsed": elapsed,
+        "remaining": remaining,
+        "frames": frames,
+        "rate": rate,
+        "channels": dict(channels),
+    }
+
+    if MODE == "probes":
+
+        rows = []
+
+        for (sta, ssid), count in probe_counts.most_common(12):
+
+            rows.append({
+                "station": sta,
+                "ssid": ssid,
+                "count": count,
+                "rssi": probe_rssi.get(sta),
+            })
+
+        base.update({
+            "stations": len(probe_station_ssids),
+            "ssids": len({
+                ssid
+                for _, ssid in probe_counts
+                if ssid != "<broadcast>"
+            }),
+            "rows": rows,
+        })
+
+
+    elif MODE == "deauth":
+
+        rows = []
+
+        for (
+            kind,
+            src,
+            dst,
+            bssid,
+            reason,
+        ), count in deauth_rows.most_common(10):
+
+            rows.append({
+                "kind": kind,
+                "source": src,
+                "dest": dst,
+                "bssid": bssid,
+                "reason": reason,
+                "count": count,
+                "rssi": deauth_rssi.get(src),
+            })
+
+        base.update({
+            "deauth": deauth_count,
+            "disassoc": disassoc_count,
+            "sources": len({
+                x[1]
+                for x in deauth_rows
+                if x[1]
+            }),
+            "rows": rows,
+        })
+
+
+    elif MODE == "eapol":
+
+        rows = []
+
+        for pair, count in eapol_pairs.most_common(10):
+
+            ap, client = pair
+
+            rows.append({
+                "ap": ap,
+                "client": client,
+                "count": count,
+                "pmkid": pair in eapol_pmkid_pairs,
+            })
+
+        base.update({
+            "eapol": eapol_count,
+            "pairs": len(eapol_pairs),
+            "pmkid": len(eapol_pmkid_pairs),
+            "rows": rows,
+        })
+
+
+    elif MODE == "stations":
+
+        rows = []
+
+        for sta, count in station_frames.most_common(12):
+
+            bssid = "-"
+
+            choices = [
+                (pair, n)
+                for pair, n in station_bssid.items()
+                if pair[0] == sta
+            ]
+
+            if choices:
+                bssid = max(
+                    choices,
+                    key=lambda x: x[1]
+                )[0][1]
+
+            rows.append({
+                "station": sta,
+                "bssid": bssid,
+                "channel": station_channel.get(sta, "-"),
+                "rssi": station_rssi.get(sta),
+                "frames": count,
+            })
+
+        base.update({
+            "stations": len(station_frames),
+            "aps": len({
+                pair[1]
+                for pair in station_bssid
+                if pair[1]
+            }),
+            "rows": rows,
+        })
+
+
+    else:
+
+        size = 0
+
+        if raw_path and os.path.exists(raw_path):
+            try:
+                size = os.path.getsize(raw_path)
+            except Exception:
+                pass
+
+        base.update({
+            "path": raw_path,
+            "bytes": size,
+        })
+
+    return base
+
+
+prepare()
+
+q = queue.Queue()
+
+try:
+
+    # --------------------------------------------------------
+    # RAW capture retention
+    # --------------------------------------------------------
+
+    if MODE == "raw":
+
+        stamp = datetime.now().strftime(
+            "%Y%m%d-%H%M%S"
+        )
+
+        raw_path = (
+            f"/mnt/captures/packet-raw/"
+            f"packet-raw-{stamp}.pcapng"
+        )
+
+        raw_capture = subprocess.Popen(
+            [
+                DUMPCAP,
+                "-i",
+                interface,
+                "-w",
+                raw_path,
+            ],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+        )
+
+    capture = subprocess.Popen(
+        command(),
+        stdout=subprocess.PIPE,
+        stderr=subprocess.DEVNULL,
+        text=True,
+        bufsize=1,
+    )
+
+    def reader():
+
+        assert capture.stdout is not None
+
+        for line in capture.stdout:
+
+            if stop_reader.is_set():
+                break
+
+            q.put(
+                line.rstrip("\r\n")
+            )
+
+    threading.Thread(
+        target=reader,
+        daemon=True,
+    ).start()
+
+    start = time.monotonic()
+    next_hop = start
+    next_emit = start
+
+    hop_index = 0
+
+    prev_frames = 0
+    prev_time = start
+
+    emit(
+        snapshot(
+            "LIVE",
+            0,
+            DURATION,
+            0,
+        )
+    )
+
+    while True:
+
+        now = time.monotonic()
+        elapsed = now - start
+
+        if elapsed >= DURATION:
+            break
+
+        if now >= next_hop:
+
+            for _ in CHANNELS:
+
+                ch = CHANNELS[
+                    hop_index % len(CHANNELS)
+                ]
+
+                hop_index += 1
+
+                if run(
+                    IW,
+                    "dev",
+                    interface,
+                    "set",
+                    "channel",
+                    str(ch),
+                ).returncode == 0:
+                    break
+
+            next_hop = now + 2.0
+
+        while True:
+
+            try:
+                line = q.get_nowait()
+            except queue.Empty:
+                break
+
+            process(line.split("\t"))
+
+        if now >= next_emit:
+
+            dt = max(
+                0.001,
+                now - prev_time,
+            )
+
+            rate = round(
+                (frames - prev_frames) / dt
+            )
+
+            prev_frames = frames
+            prev_time = now
+
+            emit(
+                snapshot(
+                    "LIVE",
+                    int(elapsed),
+                    max(
+                        0,
+                        DURATION - int(elapsed),
+                    ),
+                    rate,
+                )
+            )
+
+            next_emit = now + 1.0
+
+        time.sleep(0.04)
+
+    time.sleep(0.15)
+
+    while True:
+
+        try:
+            line = q.get_nowait()
+        except queue.Empty:
+            break
+
+        process(line.split("\t"))
+
+    emit(
+        snapshot(
+            "COMPLETE",
+            DURATION,
+            0,
+            0,
+        )
+    )
+
+finally:
+    restore()

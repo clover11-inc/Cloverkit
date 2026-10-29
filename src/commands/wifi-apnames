@@ -1,0 +1,122 @@
+#!/bin/bash
+
+set -u
+set -o pipefail
+
+if [[ $EUID -ne 0 ]]; then
+    exec sudo -n "$0" "$@"
+fi
+
+IF="${1:-}"
+shift || true
+
+[[ -n "$IF" ]] || exit 0
+[[ "$IF" != "wlan0" ]] || exit 1
+[[ -d "/sys/class/net/$IF" ]] || exit 0
+
+IW="/usr/sbin/iw"
+IP="/usr/sbin/ip"
+NMCLI="/usr/bin/nmcli"
+DUMPCAP="/usr/bin/dumpcap"
+TSHARK="/usr/bin/tshark"
+
+CHANNELS=("$@")
+
+[[ ${#CHANNELS[@]} -gt 0 ]] || exit 0
+
+WORKDIR=$(mktemp -d /tmp/wifi-apnames.XXXXXX)
+
+ORIG_TYPE=$(
+    "$IW" dev "$IF" info 2>/dev/null |
+    awk '/type / {print $2; exit}'
+)
+
+ORIG_OPER=$(
+    cat "/sys/class/net/$IF/operstate" 2>/dev/null ||
+    echo down
+)
+
+ORIG_MANAGED=""
+
+if [[ -x "$NMCLI" ]]; then
+    ORIG_MANAGED=$(
+        "$NMCLI" -g GENERAL.MANAGED device show "$IF" 2>/dev/null |
+        head -1
+    )
+fi
+
+cleanup() {
+    "$IP" link set "$IF" down >/dev/null 2>&1 || true
+
+    if [[ -n "$ORIG_TYPE" ]]; then
+        "$IW" dev "$IF" set type "$ORIG_TYPE" \
+            >/dev/null 2>&1 || true
+    fi
+
+    if [[ "$ORIG_OPER" == "up" ]]; then
+        "$IP" link set "$IF" up >/dev/null 2>&1 || true
+    else
+        "$IP" link set "$IF" down >/dev/null 2>&1 || true
+    fi
+
+    if [[ -x "$NMCLI" && -n "$ORIG_MANAGED" ]]; then
+        "$NMCLI" device set "$IF" managed "$ORIG_MANAGED" \
+            >/dev/null 2>&1 || true
+    fi
+
+    rm -rf "$WORKDIR"
+}
+
+trap cleanup EXIT INT TERM
+
+if [[ -x "$NMCLI" ]]; then
+    "$NMCLI" device set "$IF" managed no >/dev/null 2>&1 || true
+fi
+
+"$IP" link set "$IF" down >/dev/null 2>&1 || exit 0
+"$IW" dev "$IF" set type monitor >/dev/null 2>&1 || exit 0
+"$IP" link set "$IF" up >/dev/null 2>&1 || exit 0
+
+for CH in "${CHANNELS[@]}"; do
+
+    "$IW" dev "$IF" set channel "$CH" >/dev/null 2>&1 ||
+        continue
+
+    CAP="$WORKDIR/ch-$CH.pcapng"
+
+    timeout 1 "$DUMPCAP" \
+        -q \
+        -i "$IF" \
+        -w "$CAP" \
+        >/dev/null 2>&1 || true
+
+    [[ -s "$CAP" ]] || continue
+
+    "$TSHARK" \
+        -r "$CAP" \
+        -Y 'wlan.fc.type_subtype == 0x0008' \
+        -T fields \
+        -E separator=$'\x1f' \
+        -E occurrence=f \
+        -e wlan.bssid \
+        -e wlan.cisco.ccx1.name \
+        -e wlan.vs.cisco.apname_v2 \
+        2>/dev/null |
+    while IFS=$'\x1f' read -r BSSID CCXNAME APNAMEV2
+    do
+        [[ -n "$BSSID" ]] || continue
+
+        NAME="$CCXNAME"
+        [[ -n "$NAME" ]] || NAME="$APNAMEV2"
+        [[ -n "$NAME" ]] || continue
+
+        printf '%s|%s\n' \
+            "${BSSID^^}" \
+            "$NAME"
+    done
+
+done |
+awk -F'|' '
+NF >= 2 && !seen[tolower($1) FS $2]++ {
+    print
+}'

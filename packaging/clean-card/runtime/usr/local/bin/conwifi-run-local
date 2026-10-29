@@ -1,0 +1,90 @@
+#!/usr/bin/python3
+"""Root-owned no-argument launchers for local or restricted remote scan viewing."""
+import fcntl,grp,json,os,secrets,signal,subprocess,sys,tempfile,threading,time
+from pathlib import Path
+sys.path.insert(0,'/usr/local/lib/bh-interactive')
+import socket
+from cloverkit_optional_setup import send_access
+ROOT=Path('/run/cloverkit-conwifi')
+LATEST=Path('/var/lib/cloverkit/wifi-passive-health/latest.json')
+
+def call(args,**kw):return subprocess.run(args,check=True,timeout=10,stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL,**kw)
+def write(name,payload,gid,mode=0o640):
+    fd,tmp=tempfile.mkstemp(dir=ROOT,prefix='.publish-')
+    try:
+        with os.fdopen(fd,'w') as f:f.write(payload);f.flush();os.fsync(f.fileno())
+        os.chown(tmp,0,gid);os.chmod(tmp,mode);os.replace(tmp,ROOT/name)
+    finally:Path(tmp).unlink(missing_ok=True)
+def disable():
+    (ROOT/'active').unlink(missing_ok=True)
+    call(['/usr/bin/passwd','-l','conwifi'])
+def email(password,access):
+    access['email']=send_access('Advanced Wi-Fi report','conwifi',password,socket.gethostname()+'.local')
+    # Keep a readable fallback even on delivery failure. The local view owns these details.
+    access['show_password']=access['email']!='SENT'
+
+def main():
+    if os.geteuid()!=0 or len(sys.argv)!=1:raise SystemExit('Use the installed no-argument scan launcher.')
+    remote=Path(sys.argv[0]).name=='conwifi-run'
+    ROOT.mkdir(mode=0o750,exist_ok=True)
+    gid=grp.getgrnam('conwifi').gr_gid;os.chown(ROOT,0,gid);os.chmod(ROOT,0o750)
+    lock=(ROOT/'owner.lock').open('w');fcntl.flock(lock,fcntl.LOCK_EX|fcntl.LOCK_NB)
+    # Never clear access for another running scan.
+    scanlock=open('/run/lock/cloverkit-passive-health.lock','a')
+    try:fcntl.flock(scanlock,fcntl.LOCK_EX|fcntl.LOCK_NB)
+    except BlockingIOError:raise SystemExit('Advanced scan is already running; return to Tasks.')
+    fcntl.flock(scanlock,fcntl.LOCK_UN);scanlock.close()
+    disable();(ROOT/'report.json').unlink(missing_ok=True)
+    start=time.time();proc=None;stop=threading.Event();email_thread=None;access=None
+    def relay():
+        while not stop.wait(.3):
+            try:
+                d=json.loads(LATEST.read_text())
+                if d.get('updated_at',0)>=start:write('report.json',json.dumps(d),gid)
+            except (OSError,ValueError):pass
+    def cancel(sig,frame):
+        if proc is not None and proc.poll() is None:proc.send_signal(sig)
+    previous={sig:signal.signal(sig,cancel) for sig in (signal.SIGINT,signal.SIGTERM)}
+    try:
+        if remote:
+            from console_password import generate
+            password=generate()
+            subprocess.run(
+                ['/usr/sbin/chpasswd'],
+                input='conwifi:'+password+'\n',
+                text=True, check=True, timeout=10
+            )
+            subprocess.run(
+                ['/usr/bin/passwd','-u','conwifi'],
+                check=True, timeout=10, stdout=subprocess.DEVNULL
+            )
+            status=subprocess.run(
+                ['/usr/bin/passwd','-S','conwifi'],
+                check=True, text=True, capture_output=True, timeout=10
+            ).stdout.split()
+            if len(status)<2 or status[1]!='P':
+                raise RuntimeError('Wi-Fi console password was not activated; credentials not emailed.')
+
+            write('active',secrets.token_hex(16),gid)
+            access={'username':'conwifi','host':socket.gethostname()+'.local','password':password,'email':'PENDING','show_password':True}
+            email_thread=threading.Thread(target=email,args=(password,access),daemon=True);email_thread.start()
+        proc=subprocess.Popen(['/usr/local/bin/wifi-passive-health-panel'],stdout=subprocess.PIPE,text=True)
+        worker=threading.Thread(target=relay,daemon=True);worker.start()
+        for line in proc.stdout:
+            try:
+                snapshot=json.loads(line)
+                if access and isinstance(snapshot,dict) and snapshot.get('schema')==1:
+                    local={k:v for k,v in access.items() if k!='password' or access['show_password']}
+                    snapshot['local_access']=local
+                print(json.dumps(snapshot),flush=True)
+            except ValueError:print(line,end='',flush=True)
+        return proc.wait()
+    finally:
+        stop.set()
+        if proc is not None and proc.poll() is None:
+            proc.terminate()
+            try:proc.wait(timeout=180)
+            except subprocess.TimeoutExpired:proc.kill();proc.wait()
+        disable()
+        for sig,handler in previous.items():signal.signal(sig,handler)
+if __name__=='__main__':raise SystemExit(main())

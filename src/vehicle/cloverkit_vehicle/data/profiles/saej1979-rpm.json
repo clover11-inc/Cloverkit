@@ -1,0 +1,8 @@
+{
+  "id": "saej1979-rpm-reference",
+  "applicability": {"make": "standard OBD-II", "year": "vehicle-dependent", "engine": "engine/emissions ECU advertising PID 0C"},
+  "source": "https://github.com/OBDb/SAEJ1979",
+  "license": "CC-BY-SA-4.0",
+  "verification": "Read-only reference mapping; software-emulated. Real vehicle unverified. Runtime uses supported standard RPM decoder, not this profile automatically.",
+  "commands": [{"name": "Engine RPM", "request": "010C", "header": "7E0", "bytes": 2, "formula": "(A*256+B)/4", "unit": "rpm"}]
+}

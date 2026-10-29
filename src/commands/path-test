@@ -1,0 +1,775 @@
+#!/bin/bash
+
+set -u
+
+IP="/usr/sbin/ip"
+IW="/usr/sbin/iw"
+ETHTOOL="/usr/sbin/ethtool"
+IPERF="/usr/bin/iperf3"
+TSHARK="/usr/bin/tshark"
+
+DETAIL=0
+
+# ============================================================
+# QUICK FULL PATH TEST
+# ============================================================
+#
+# path-test
+#
+# Shows:
+#   - selected interface
+#   - source IPv4
+#   - default gateway
+#   - Wi-Fi SSID if applicable
+#   - gateway reachability
+#   - internet reachability
+#   - DNS resolution
+#   - actual hop-by-hop route toward 1.1.1.1
+#
+# Existing advanced modes remain:
+#   path-test <client> <server>
+#   path-test --detail <client> <server>
+# ============================================================
+
+quick_path_test() {
+    IP="/usr/sbin/ip"
+    IW="/usr/sbin/iw"
+
+    TARGET="1.1.1.1"
+    TARGET_OWNER="Cloudflare"
+    TARGET_PURPOSE="Public DNS / Internet test target"
+
+    echo
+    echo "========================================"
+    echo " PATH TEST"
+    echo "========================================"
+    echo
+
+    ROUTE="$("$IP" route get "$TARGET" 2>/dev/null | head -1 || true)"
+
+    IFACE="$(
+        echo "$ROUTE" |
+        awk '{
+            for(i=1;i<=NF;i++)
+                if($i=="dev"){print $(i+1); exit}
+        }'
+    )"
+
+    SRC="$(
+        echo "$ROUTE" |
+        awk '{
+            for(i=1;i<=NF;i++)
+                if($i=="src"){print $(i+1); exit}
+        }'
+    )"
+
+    ROUTE_VIA="$(
+        echo "$ROUTE" |
+        awk '{
+            for(i=1;i<=NF;i++)
+                if($i=="via"){print $(i+1); exit}
+        }'
+    )"
+
+    LOCAL_GW="$(
+        "$IP" -4 route show default 2>/dev/null |
+        awk '
+            /default/ {
+                for(i=1;i<=NF;i++)
+                    if($i=="via"){print $(i+1); exit}
+            }
+        '
+    )"
+
+    LOCAL_IF="$(
+        "$IP" -4 route show default 2>/dev/null |
+        awk '
+            /default/ {
+                for(i=1;i<=NF;i++)
+                    if($i=="dev"){print $(i+1); exit}
+            }
+        '
+    )"
+
+    [ -z "$IFACE" ] && IFACE="-"
+    [ -z "$SRC" ] && SRC="-"
+    [ -z "$ROUTE_VIA" ] && ROUTE_VIA="-"
+    [ -z "$LOCAL_GW" ] && LOCAL_GW="-"
+    [ -z "$LOCAL_IF" ] && LOCAL_IF="-"
+
+    TYPE="Unknown"
+    VPN="NO"
+
+    case "$IFACE" in
+        tun*|tap*|wg*|ppp*|tailscale*|zt*)
+            TYPE="Tunnel"
+            VPN="YES"
+            ;;
+        *)
+            if [ "$IFACE" != "-" ] &&
+               [ -d "/sys/class/net/$IFACE/wireless" ]; then
+                TYPE="WiFi"
+            elif [ "$IFACE" != "-" ] &&
+                 [ -e "/sys/class/net/$IFACE" ]; then
+                TYPE="Ethernet"
+            fi
+            ;;
+    esac
+
+    echo "SOURCE"
+    echo "----------------------------------------"
+    echo "Interface : $IFACE"
+    echo "Type      : $TYPE"
+    echo "IPv4      : $SRC"
+    echo "VPN       : $VPN"
+
+    if [ "$TYPE" = "WiFi" ] && [ -x "$IW" ]; then
+        SSID="$(
+            "$IW" dev "$IFACE" link 2>/dev/null |
+            sed -n 's/^[[:space:]]*SSID: //p' |
+            head -1
+        )"
+
+        [ -n "$SSID" ] && echo "WiFi      : $SSID"
+    fi
+
+    if [ "$LOCAL_GW" != "-" ]; then
+        echo "Local GW  : $LOCAL_GW via $LOCAL_IF"
+    fi
+
+    if [ "$ROUTE_VIA" != "-" ] &&
+       [ "$ROUTE_VIA" != "$LOCAL_GW" ]; then
+        echo "Route via : $ROUTE_VIA"
+    fi
+
+    echo
+    echo "TARGET"
+    echo "----------------------------------------"
+    echo "Address   : $TARGET"
+    echo "Owner     : $TARGET_OWNER"
+    echo "Purpose   : $TARGET_PURPOSE"
+
+    echo
+    echo "PATH"
+    echo "----------------------------------------"
+
+    TRACE=""
+    TRACE_TOOL="NONE"
+
+    if command -v traceroute >/dev/null 2>&1; then
+        TRACE_TOOL="traceroute"
+        TRACE="$(
+            traceroute -n -w 1 -q 1 -m 20 "$TARGET" 2>/dev/null || true
+        )"
+    elif command -v tracepath >/dev/null 2>&1; then
+        TRACE_TOOL="tracepath"
+        TRACE="$(
+            tracepath -n "$TARGET" 2>/dev/null || true
+        )"
+    fi
+
+    if [ "$TRACE_TOOL" = "NONE" ]; then
+        echo "No traceroute or tracepath installed."
+    else
+        echo "$TRACE"
+    fi
+
+    ROUTE_STATUS="INCOMPLETE"
+
+    if echo "$TRACE" |
+       awk -v target="$TARGET" '
+           $1 ~ /^[0-9]+$/ && $2 == target {found=1}
+           END {exit !found}
+       '
+    then
+        ROUTE_STATUS="COMPLETE"
+    fi
+
+    PING_STATUS="BLOCKED/NO REPLY"
+
+    if ping -c 1 -W 2 "$TARGET" >/dev/null 2>&1; then
+        PING_STATUS="PASS"
+    fi
+
+    DNS_STATUS="FAIL"
+
+    if getent ahostsv4 example.com >/dev/null 2>&1; then
+        DNS_STATUS="PASS"
+    fi
+
+    TARGET_STATUS="FAIL"
+
+    if [ "$PING_STATUS" = "PASS" ] ||
+       [ "$ROUTE_STATUS" = "COMPLETE" ]; then
+        TARGET_STATUS="PASS"
+    fi
+
+    echo
+    echo "CHECKS"
+    echo "----------------------------------------"
+    printf "%-10s : %s\n" "Target" "$TARGET_STATUS"
+    printf "%-10s : %s\n" "DNS" "$DNS_STATUS"
+    printf "%-10s : %s\n" "Route" "$ROUTE_STATUS"
+    printf "%-10s : %s\n" "Ping" "$PING_STATUS"
+    printf "%-10s : %s\n" "VPN" "$VPN"
+
+    echo
+    echo "SUMMARY"
+    echo "----------------------------------------"
+
+    printf "BH"
+
+    if [ "$VPN" = "YES" ]; then
+        printf " -> VPN (%s)" "$IFACE"
+    elif [ "$IFACE" != "-" ]; then
+        printf " -> %s" "$IFACE"
+    fi
+
+    if [ "$ROUTE_STATUS" = "COMPLETE" ]; then
+        printf " -> %s (%s)" "$TARGET_OWNER" "$TARGET"
+    else
+        printf " -> %s (%s) ?" "$TARGET_OWNER" "$TARGET"
+    fi
+
+    echo
+
+    RESULT="PASS"
+
+    if [ "$TARGET_STATUS" != "PASS" ] ||
+       [ "$DNS_STATUS" != "PASS" ]; then
+        RESULT="FAIL"
+    fi
+
+    echo
+    echo "RESULT : $RESULT"
+    echo
+
+    [ "$RESULT" = "PASS" ]
+}
+if [ "$#" -eq 0 ]; then
+    quick_path_test
+    exit $?
+fi
+
+# ============================================================
+# QUICK PATH TEST
+# ============================================================
+#
+# No arguments:
+#   path-test
+#
+# Performs a lightweight connectivity/path check without
+# modifying interfaces, namespaces, NetworkManager or routes.
+#
+# Existing advanced modes remain:
+#   path-test <client> <server>
+#   path-test --detail <client> <server>
+# ============================================================
+
+quick_path_test() {
+    IP="/usr/sbin/ip"
+
+    echo
+    echo "========================================"
+    echo " PATH TEST"
+    echo "========================================"
+    echo
+
+    ROUTE="$("$IP" route get 1.1.1.1 2>/dev/null | head -1 || true)"
+
+    IFACE="$(
+        echo "$ROUTE" |
+        awk '{
+            for(i=1;i<=NF;i++)
+                if($i=="dev"){print $(i+1); exit}
+        }'
+    )"
+
+    SRC="$(
+        echo "$ROUTE" |
+        awk '{
+            for(i=1;i<=NF;i++)
+                if($i=="src"){print $(i+1); exit}
+        }'
+    )"
+
+    GATEWAY="$(
+        "$IP" route show default 2>/dev/null |
+        awk '
+            /default/ {
+                for(i=1;i<=NF;i++)
+                    if($i=="via"){print $(i+1); exit}
+            }
+        '
+    )"
+
+    [ -z "$IFACE" ] && IFACE="-"
+    [ -z "$SRC" ] && SRC="-"
+    [ -z "$GATEWAY" ] && GATEWAY="-"
+
+    TYPE="Unknown"
+
+    if [ "$IFACE" != "-" ]; then
+        if [ -d "/sys/class/net/$IFACE/wireless" ]; then
+            TYPE="WiFi"
+        elif [ -e "/sys/class/net/$IFACE" ]; then
+            TYPE="Ethernet"
+        fi
+    fi
+
+    echo "Interface : $IFACE"
+    echo "Type      : $TYPE"
+    echo "IPv4      : $SRC"
+    echo "Gateway   : $GATEWAY"
+
+    if [ "$TYPE" = "WiFi" ] && command -v iw >/dev/null 2>&1; then
+        SSID="$(
+            /usr/sbin/iw dev "$IFACE" link 2>/dev/null |
+            sed -n 's/^[[:space:]]*SSID: //p' |
+            head -1
+        )"
+
+        [ -n "$SSID" ] && echo "WiFi      : $SSID"
+    fi
+
+    echo
+    echo "CHECKS"
+    echo "----------------------------------------"
+
+    GW_STATUS="SKIP"
+    NET_STATUS="FAIL"
+    DNS_STATUS="FAIL"
+
+    if [ "$GATEWAY" != "-" ]; then
+        if ping -c 1 -W 2 "$GATEWAY" >/dev/null 2>&1; then
+            GW_STATUS="PASS"
+        else
+            GW_STATUS="FAIL"
+        fi
+    fi
+
+    if ping -c 1 -W 2 1.1.1.1 >/dev/null 2>&1; then
+        NET_STATUS="PASS"
+    elif command -v curl >/dev/null 2>&1 &&
+         curl -4 -fsS \
+            --connect-timeout 3 \
+            --max-time 5 \
+            https://1.1.1.1/ \
+            >/dev/null 2>&1; then
+        NET_STATUS="PASS"
+    fi
+
+    if getent ahostsv4 example.com >/dev/null 2>&1; then
+        DNS_STATUS="PASS"
+    fi
+
+    printf "%-10s : %s" "Gateway" "$GW_STATUS"
+    [ "$GATEWAY" != "-" ] && printf "   %s" "$GATEWAY"
+    echo
+
+    printf "%-10s : %s   1.1.1.1\n" "Internet" "$NET_STATUS"
+    printf "%-10s : %s   example.com\n" "DNS" "$DNS_STATUS"
+
+    echo
+    echo "PATH"
+    echo "----------------------------------------"
+
+    printf "BH"
+
+    if [ "$IFACE" != "-" ]; then
+        printf " -> %s" "$IFACE"
+    fi
+
+    if [ "$GATEWAY" != "-" ]; then
+        printf " -> %s" "$GATEWAY"
+    fi
+
+    if [ "$NET_STATUS" = "PASS" ]; then
+        printf " -> INTERNET"
+    else
+        printf " -> INTERNET?"
+    fi
+
+    echo
+    echo
+
+    RESULT="PASS"
+
+    if [ "$NET_STATUS" != "PASS" ] ||
+       [ "$DNS_STATUS" != "PASS" ]; then
+        RESULT="FAIL"
+    fi
+
+    echo "RESULT : $RESULT"
+    echo
+
+    if [ "$RESULT" = "PASS" ]; then
+        return 0
+    else
+        return 1
+    fi
+}
+
+if [ "$#" -eq 0 ]; then
+    quick_path_test
+    exit $?
+fi
+
+if [ "${1:-}" = "--detail" ]; then
+    DETAIL=1
+    shift
+fi
+
+CLIENT_IF="${1:-}"
+SERVER_IF="${2:-}"
+
+NS="bh-path-test"
+PORT=5201
+
+if [ -z "$CLIENT_IF" ] || [ -z "$SERVER_IF" ]; then
+    echo "Usage:"
+    echo "  path-test <client> <server>"
+    echo "  path-test --detail <client> <server>"
+    exit 1
+fi
+
+if [ "$CLIENT_IF" = "$SERVER_IF" ]; then
+    echo "ERROR: interfaces must differ"
+    exit 1
+fi
+
+if [ "$EUID" -ne 0 ]; then
+    if [ "$DETAIL" -eq 1 ]; then
+        exec sudo -n /usr/local/bin/path-test --detail "$CLIENT_IF" "$SERVER_IF"
+    else
+        exec sudo -n /usr/local/bin/path-test "$CLIENT_IF" "$SERVER_IF"
+    fi
+fi
+
+for IF in "$CLIENT_IF" "$SERVER_IF"; do
+    "$IP" link show "$IF" >/dev/null 2>&1 || {
+        echo "ERROR: $IF not found"
+        exit 1
+    }
+done
+
+CLIENT_CIDR=$(
+    "$IP" -4 -o addr show "$CLIENT_IF" 2>/dev/null |
+    awk '{print $4; exit}'
+)
+
+SERVER_CIDR=$(
+    "$IP" -4 -o addr show "$SERVER_IF" 2>/dev/null |
+    awk '{print $4; exit}'
+)
+
+if [ -z "$CLIENT_CIDR" ] || [ -z "$SERVER_CIDR" ]; then
+    echo "ERROR: both interfaces need IPv4"
+    exit 1
+fi
+
+CLIENT_IP="${CLIENT_CIDR%%/*}"
+SERVER_IP="${SERVER_CIDR%%/*}"
+SERVER_PREFIX="${SERVER_CIDR##*/}"
+
+CLIENT_TYPE="Ethernet"
+SERVER_TYPE="Ethernet"
+
+[ -d "/sys/class/net/$CLIENT_IF/wireless" ] && CLIENT_TYPE="WiFi"
+[ -d "/sys/class/net/$SERVER_IF/wireless" ] && SERVER_TYPE="WiFi"
+
+CLIENT_SSID="-"
+CLIENT_BSSID="-"
+CLIENT_SIGNAL="-"
+CLIENT_TXRATE="-"
+CLIENT_RXRATE="-"
+
+if [ "$CLIENT_TYPE" = "WiFi" ]; then
+    LINK=$("$IW" dev "$CLIENT_IF" link 2>/dev/null)
+
+    CLIENT_SSID=$(
+        echo "$LINK" |
+        sed -n 's/^[[:space:]]*SSID: //p' |
+        head -1
+    )
+
+    CLIENT_BSSID=$(
+        echo "$LINK" |
+        awk '/Connected to/ {print $3; exit}'
+    )
+
+    CLIENT_SIGNAL=$(
+        echo "$LINK" |
+        awk '/signal:/ {print $2" "$3; exit}'
+    )
+
+    CLIENT_TXRATE=$(
+        echo "$LINK" |
+        sed -n 's/^[[:space:]]*tx bitrate: //p' |
+        head -1
+    )
+
+    CLIENT_RXRATE=$(
+        echo "$LINK" |
+        sed -n 's/^[[:space:]]*rx bitrate: //p' |
+        head -1
+    )
+fi
+
+SERVER_SPEED="-"
+
+if [ "$SERVER_TYPE" = "Ethernet" ]; then
+    SPEED=$(
+        "$ETHTOOL" "$SERVER_IF" 2>/dev/null |
+        awk -F': ' '/Speed:/{print $2}'
+    )
+
+    DUPLEX=$(
+        "$ETHTOOL" "$SERVER_IF" 2>/dev/null |
+        awk -F': ' '/Duplex:/{print $2}'
+    )
+
+    [ -n "$SPEED" ] && SERVER_SPEED="$SPEED $DUPLEX"
+fi
+
+SWITCH="-"
+SWITCH_PORT="-"
+VLAN="-"
+DISCOVERY="-"
+
+if [ "$SERVER_TYPE" = "Ethernet" ]; then
+
+    DISC=$(
+        timeout 6 "$TSHARK" \
+        -i "$SERVER_IF" \
+        -n \
+        -c 1 \
+        -f 'ether proto 0x88cc or ether dst 01:00:0c:cc:cc:cc' \
+        -V 2>/dev/null
+    )
+
+    if echo "$DISC" | grep -q "Link Layer Discovery Protocol"; then
+        DISCOVERY="LLDP"
+
+        SWITCH=$(
+            echo "$DISC" |
+            sed -n 's/^[[:space:]]*System Name = //p' |
+            head -1
+        )
+
+        SWITCH_PORT=$(
+            echo "$DISC" |
+            sed -n 's/^[[:space:]]*Port Description = //p' |
+            head -1
+        )
+
+        VLAN=$(
+            echo "$DISC" |
+            sed -n 's/.*ID: \([0-9][0-9]*\)$/\1/p' |
+            head -1
+        )
+    fi
+fi
+
+[ -z "$SWITCH" ] && SWITCH="-"
+[ -z "$SWITCH_PORT" ] && SWITCH_PORT="-"
+[ -z "$VLAN" ] && VLAN="-"
+
+CLIENT_RX_BEFORE=$(cat "/sys/class/net/$CLIENT_IF/statistics/rx_bytes")
+CLIENT_TX_BEFORE=$(cat "/sys/class/net/$CLIENT_IF/statistics/tx_bytes")
+SERVER_RX_BEFORE=$(cat "/sys/class/net/$SERVER_IF/statistics/rx_bytes")
+SERVER_TX_BEFORE=$(cat "/sys/class/net/$SERVER_IF/statistics/tx_bytes")
+
+cleanup() {
+    "$IP" netns exec "$NS" pkill -f "iperf3 -s" 2>/dev/null || true
+
+    if "$IP" netns exec "$NS" "$IP" link show "$SERVER_IF" >/dev/null 2>&1; then
+        "$IP" netns exec "$NS" "$IP" link set "$SERVER_IF" netns 1
+    fi
+
+    "$IP" netns del "$NS" 2>/dev/null || true
+
+    nmcli device connect "$SERVER_IF" >/dev/null 2>&1 || true
+}
+
+trap cleanup EXIT INT TERM
+
+nmcli device disconnect "$SERVER_IF" >/dev/null 2>&1 || true
+
+"$IP" netns del "$NS" 2>/dev/null || true
+"$IP" netns add "$NS"
+
+"$IP" link set "$SERVER_IF" netns "$NS"
+
+"$IP" netns exec "$NS" \
+    "$IP" addr add "$SERVER_IP/$SERVER_PREFIX" dev "$SERVER_IF"
+
+"$IP" netns exec "$NS" "$IP" link set "$SERVER_IF" up
+"$IP" netns exec "$NS" "$IP" link set lo up
+
+sleep 2
+
+ROUTE=$(
+    "$IP" route get "$SERVER_IP" from "$CLIENT_IP" 2>/dev/null |
+    head -1
+)
+
+if echo "$ROUTE" | grep -q ' dev lo '; then
+    echo "PATH TEST"
+    echo "FAILED: local shortcut remains"
+    exit 1
+fi
+
+if ! echo "$ROUTE" | grep -q " dev $CLIENT_IF "; then
+    echo "PATH TEST"
+    echo "FAILED: route not using $CLIENT_IF"
+    exit 1
+fi
+
+"$IP" netns exec "$NS" \
+    "$IPERF" -s -B "$SERVER_IP" -p "$PORT" \
+    >/run/path-test-server.log 2>&1 &
+
+sleep 2
+
+FORWARD=$(
+    "$IPERF" \
+    -c "$SERVER_IP" \
+    -B "$CLIENT_IP" \
+    -p "$PORT" \
+    -t 5 \
+    -f m \
+    2>&1
+)
+
+REVERSE=$(
+    "$IPERF" \
+    -c "$SERVER_IP" \
+    -B "$CLIENT_IP" \
+    -p "$PORT" \
+    -t 5 \
+    -R \
+    -f m \
+    2>&1
+)
+
+FWD=$(
+    echo "$FORWARD" |
+    awk '/receiver$/ {print $(NF-2),$(NF-1); exit}'
+)
+
+REV=$(
+    echo "$REVERSE" |
+    awk '/receiver$/ {print $(NF-2),$(NF-1); exit}'
+)
+
+[ -z "$FWD" ] && FWD="FAILED"
+[ -z "$REV" ] && REV="FAILED"
+
+CLIENT_RX_AFTER=$(cat "/sys/class/net/$CLIENT_IF/statistics/rx_bytes")
+CLIENT_TX_AFTER=$(cat "/sys/class/net/$CLIENT_IF/statistics/tx_bytes")
+
+SERVER_RX_AFTER=$(
+    "$IP" netns exec "$NS" \
+    cat "/sys/class/net/$SERVER_IF/statistics/rx_bytes"
+)
+
+SERVER_TX_AFTER=$(
+    "$IP" netns exec "$NS" \
+    cat "/sys/class/net/$SERVER_IF/statistics/tx_bytes"
+)
+
+CLIENT_RX_DELTA=$((CLIENT_RX_AFTER - CLIENT_RX_BEFORE))
+CLIENT_TX_DELTA=$((CLIENT_TX_AFTER - CLIENT_TX_BEFORE))
+SERVER_RX_DELTA=$((SERVER_RX_AFTER - SERVER_RX_BEFORE))
+SERVER_TX_DELTA=$((SERVER_TX_AFTER - SERVER_TX_BEFORE))
+
+VERIFIED="NO"
+
+if [ "$CLIENT_TX_DELTA" -gt 0 ] &&
+   [ "$CLIENT_RX_DELTA" -gt 0 ] &&
+   [ "$SERVER_TX_DELTA" -gt 0 ] &&
+   [ "$SERVER_RX_DELTA" -gt 0 ]; then
+    VERIFIED="YES"
+fi
+
+echo "PATH TEST"
+echo
+
+echo "CLIENT"
+echo "$CLIENT_IF  $CLIENT_IP  $CLIENT_TYPE"
+
+if [ "$CLIENT_TYPE" = "WiFi" ]; then
+    echo "$CLIENT_SSID"
+    echo "Signal    : ${CLIENT_SIGNAL:--}"
+    echo "TX PHY    : ${CLIENT_TXRATE:--}"
+fi
+
+echo
+echo "SERVER"
+echo "$SERVER_IF  $SERVER_IP  $SERVER_TYPE"
+
+if [ "$SERVER_TYPE" = "Ethernet" ]; then
+    echo "Link      : $SERVER_SPEED"
+fi
+
+if [ "$SWITCH" != "-" ]; then
+    echo "Neighbor  : $SWITCH"
+    echo "Port      : $SWITCH_PORT"
+    echo "VLAN      : $VLAN"
+fi
+
+echo
+echo "OBSERVED PATH"
+echo "$CLIENT_IF"
+[ "$CLIENT_TYPE" = "WiFi" ] && echo " -> WiFi $CLIENT_SSID"
+echo " -> [ intermediate path unknown ]"
+
+if [ "$SWITCH" != "-" ]; then
+    echo " -> $SWITCH / $SWITCH_PORT"
+fi
+
+echo " -> $SERVER_IF"
+
+echo
+echo "PERFORMANCE"
+echo "Forward   : $FWD"
+echo "Reverse   : $REV"
+
+echo
+echo "VERIFIED"
+echo "Physical  : $VERIFIED"
+echo "Loopback  : REMOVED"
+
+if [ "$DETAIL" -eq 1 ]; then
+    echo
+    echo "DETAIL"
+    echo "Kernel route:"
+    echo "$ROUTE"
+
+    echo
+    echo "Client"
+    echo "BSSID     : $CLIENT_BSSID"
+    echo "RX PHY    : $CLIENT_RXRATE"
+
+    echo
+    echo "Interface bytes"
+    echo "Client TX : +$CLIENT_TX_DELTA"
+    echo "Client RX : +$CLIENT_RX_DELTA"
+    echo "Server TX : +$SERVER_TX_DELTA"
+    echo "Server RX : +$SERVER_RX_DELTA"
+
+    echo
+    echo "Evidence"
+    echo "Client NIC traffic : OBSERVED"
+    echo "Server NIC traffic : OBSERVED"
+    echo "Local shortcut     : REMOVED"
+
+    echo
+    echo "Unknown"
+    echo "Intermediate L2/L3 devices"
+    echo "Exact path between endpoints"
+fi
+
+echo
+echo "Restoring $SERVER_IF..."

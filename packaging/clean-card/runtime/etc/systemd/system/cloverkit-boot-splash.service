@@ -1,0 +1,16 @@
+[Unit]
+Description=Cloverkit startup image and loading bar
+DefaultDependencies=no
+After=systemd-remount-fs.service
+Before=local-fs.target sysinit.target bh-boot.service shutdown.target
+Conflicts=shutdown.target
+
+[Service]
+Type=simple
+ExecStart=/usr/bin/python3 /usr/local/lib/bh-interactive/clover_boot_splash.py
+TimeoutStopSec=3
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=sysinit.target

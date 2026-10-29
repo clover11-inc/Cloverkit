@@ -1,0 +1,12 @@
+[Unit]
+Description=CloverKit optional recovery hotspot override
+
+[Timer]
+OnBootSec=30
+OnUnitInactiveSec=30
+Unit=cloverkit-recovery-hotspot.service
+
+[Install]
+WantedBy=timers.target
+
+# Enablement occurs only when the operator explicitly finishes setup, never during staging.

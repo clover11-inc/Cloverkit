@@ -1,0 +1,37 @@
+#!/usr/bin/env python3
+"""Scoped, no-argument writer for a user-confirmed AP/BSSID mapping."""
+import json,sys,re,os,fcntl,tempfile
+from pathlib import Path
+ROOT=Path('/var/lib/cloverkit/wifi-passive-health')
+MAC=re.compile(r'^(?:[0-9a-f]{2}:){5}[0-9a-f]{2}$')
+def save_mapping(root,request):
+    identity=request.get('id');name=request.get('name');members=request.get('bssids')
+    if not isinstance(identity,str) or not re.fullmatch(r'[A-Za-z0-9_.:-]{1,120}',identity): raise ValueError('Invalid AP identity')
+    if not isinstance(name,str) or not name.strip() or len(name)>120 or not name.isprintable(): raise ValueError('Invalid AP name')
+    if not isinstance(members,list) or not 1<=len(members)<=2000 or any(not isinstance(m,str) or not MAC.fullmatch(m) for m in members): raise ValueError('Invalid BSSID list')
+    current=json.loads((root/'latest.json').read_text());observed={a['bssid'] for a in current.get('aps',[])}
+    if not set(members)<=observed: raise ValueError('BSSID is no longer in the captured inventory')
+    path=root/'ap-inventory.json';records=json.loads(path.read_text()) if path.exists() else {}
+    if not isinstance(records,dict): raise ValueError('Existing mapping is invalid')
+    for member in members:
+        old=records.get(member,{})
+        if old.get('id') and old['id']!=identity: raise ValueError('BSSID already belongs to another confirmed AP')
+    for member in members: records[member]=dict(id=identity,name=name,radio=records.get(member,{}).get('radio',''))
+    fd,temp=tempfile.mkstemp(prefix='.ap-map-',dir=root)
+    try:
+        with os.fdopen(fd,'w') as f: json.dump(records,f,indent=2);f.flush();os.fsync(f.fileno())
+        os.chmod(temp,0o644);os.replace(temp,path)
+    finally:
+        if os.path.exists(temp): os.unlink(temp)
+    return dict(status='saved',id=identity,bssids=len(set(members)))
+def main():
+    try:
+        if len(sys.argv)!=1 or os.geteuid()!=0: raise ValueError('Use the scoped panel mapping action')
+        request=json.loads(sys.stdin.read(65537))
+        with open(ROOT/'.ap-inventory.lock','a') as lock:
+            fcntl.flock(lock,fcntl.LOCK_EX);result=save_mapping(ROOT,request)
+        print(json.dumps(result))
+    except (ValueError,OSError,KeyError,TypeError,AttributeError) as e:
+        print(json.dumps(dict(status='error',message=str(e))));return 1
+    return 0
+if __name__=='__main__':sys.exit(main())

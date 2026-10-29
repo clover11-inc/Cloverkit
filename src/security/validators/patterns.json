@@ -1,0 +1,427 @@
+{
+  "schema_version": 1,
+  "generated": "2026-09-01T01:20:11.339308+00:00",
+  "pattern_count": 60,
+  "patterns": [
+    {
+      "id": "http_status_signature",
+      "family": "HTTP_WEB",
+      "risk": "SAFE",
+      "implemented": true,
+      "description": "Compare HTTP response status against a CVE-specific expected value."
+    },
+    {
+      "id": "http_body_signature",
+      "family": "HTTP_WEB",
+      "risk": "SAFE",
+      "implemented": true,
+      "description": "Look for a bounded CVE-specific marker in an HTTP response body."
+    },
+    {
+      "id": "http_header_signature",
+      "family": "HTTP_WEB",
+      "risk": "SAFE",
+      "implemented": true,
+      "description": "Check a response header for a CVE-specific marker or value."
+    },
+    {
+      "id": "http_unauth_endpoint",
+      "family": "HTTP_WEB",
+      "risk": "SAFE",
+      "implemented": true,
+      "description": "Check whether a specific endpoint responds without authentication."
+    },
+    {
+      "id": "http_redirect_behavior",
+      "family": "HTTP_WEB",
+      "risk": "SAFE",
+      "implemented": true,
+      "description": "Validate a CVE-specific HTTP redirect or routing condition."
+    },
+    {
+      "id": "auth_required_check",
+      "family": "AUTH_SESSION",
+      "risk": "SAFE",
+      "implemented": true,
+      "description": "Confirm whether a target resource correctly requires authentication."
+    },
+    {
+      "id": "session_cookie_flags",
+      "family": "AUTH_SESSION",
+      "risk": "SAFE",
+      "implemented": true,
+      "description": "Inspect security attributes on session cookies."
+    },
+    {
+      "id": "default_access_condition",
+      "family": "AUTH_SESSION",
+      "risk": "ACTIVE",
+      "implemented": false,
+      "description": "Validate a CVE-specific default or unauthenticated access condition."
+    },
+    {
+      "id": "auth_bypass_precondition",
+      "family": "AUTH_SESSION",
+      "risk": "ACTIVE",
+      "implemented": false,
+      "description": "Confirm prerequisites for an authentication-bypass vulnerability without generic exploitation."
+    },
+    {
+      "id": "logout_session_invalidation",
+      "family": "AUTH_SESSION",
+      "risk": "ACTIVE",
+      "implemented": false,
+      "description": "Validate whether a session remains usable after a controlled logout workflow."
+    },
+    {
+      "id": "api_unauth_endpoint",
+      "family": "API",
+      "risk": "SAFE",
+      "implemented": true,
+      "description": "Check a specified API endpoint for unauthenticated exposure."
+    },
+    {
+      "id": "api_object_authz_precondition",
+      "family": "API",
+      "risk": "ACTIVE",
+      "implemented": false,
+      "description": "Validate object-level authorization prerequisites without arbitrary enumeration."
+    },
+    {
+      "id": "api_method_exposure",
+      "family": "API",
+      "risk": "SAFE",
+      "implemented": true,
+      "description": "Check whether a CVE-relevant API method is exposed."
+    },
+    {
+      "id": "api_cors_policy",
+      "family": "API",
+      "risk": "SAFE",
+      "implemented": true,
+      "description": "Validate a CVE-specific CORS response condition."
+    },
+    {
+      "id": "api_error_disclosure",
+      "family": "API",
+      "risk": "SAFE",
+      "implemented": true,
+      "description": "Check API error responses for a specific unintended disclosure marker."
+    },
+    {
+      "id": "info_disclosure_marker",
+      "family": "INFO_FILE",
+      "risk": "SAFE",
+      "implemented": true,
+      "description": "Request only enough data to prove a known information disclosure marker."
+    },
+    {
+      "id": "known_file_read",
+      "family": "INFO_FILE",
+      "risk": "ACTIVE",
+      "implemented": false,
+      "description": "Read only an explicitly approved harmless marker file when required by a CVE."
+    },
+    {
+      "id": "path_normalization_behavior",
+      "family": "INFO_FILE",
+      "risk": "ACTIVE",
+      "implemented": false,
+      "description": "Test CVE-specific path normalization using a bounded harmless target."
+    },
+    {
+      "id": "directory_listing",
+      "family": "INFO_FILE",
+      "risk": "SAFE",
+      "implemented": true,
+      "description": "Check whether directory listing is exposed where the CVE requires it."
+    },
+    {
+      "id": "backup_file_exposure",
+      "family": "INFO_FILE",
+      "risk": "SAFE",
+      "implemented": true,
+      "description": "Check one explicitly named backup/config artifact for unintended exposure."
+    },
+    {
+      "id": "tls_protocol_support",
+      "family": "TLS_CRYPTO",
+      "risk": "SAFE",
+      "implemented": true,
+      "description": "Test support for a specific TLS protocol version."
+    },
+    {
+      "id": "tls_cipher_support",
+      "family": "TLS_CRYPTO",
+      "risk": "SAFE",
+      "implemented": false,
+      "description": "Test support for a specific CVE-relevant TLS cipher suite."
+    },
+    {
+      "id": "cert_hostname_validation",
+      "family": "TLS_CRYPTO",
+      "risk": "SAFE",
+      "implemented": false,
+      "description": "Validate certificate identity properties relevant to the advisory."
+    },
+    {
+      "id": "cert_expiry_chain",
+      "family": "TLS_CRYPTO",
+      "risk": "SAFE",
+      "implemented": false,
+      "description": "Inspect certificate expiry and chain properties."
+    },
+    {
+      "id": "weak_signature_algorithm",
+      "family": "TLS_CRYPTO",
+      "risk": "SAFE",
+      "implemented": false,
+      "description": "Detect a CVE-relevant weak certificate or cryptographic signature algorithm."
+    },
+    {
+      "id": "ssh_algorithm_condition",
+      "family": "REMOTE_MGMT",
+      "risk": "SAFE",
+      "implemented": false,
+      "description": "Check SSH negotiation for an advisory-specific algorithm condition."
+    },
+    {
+      "id": "ssh_config_precondition",
+      "family": "REMOTE_MGMT",
+      "risk": "SAFE",
+      "implemented": false,
+      "description": "Validate a configuration prerequisite for an SSH CVE."
+    },
+    {
+      "id": "ftp_anonymous_auth",
+      "family": "REMOTE_MGMT",
+      "risk": "SAFE",
+      "implemented": false,
+      "description": "Confirm whether standard anonymous FTP authentication is accepted."
+    },
+    {
+      "id": "telnet_login_presence",
+      "family": "REMOTE_MGMT",
+      "risk": "SAFE",
+      "implemented": false,
+      "description": "Confirm a Telnet login service without supplying credentials."
+    },
+    {
+      "id": "webdav_method_exposure",
+      "family": "REMOTE_MGMT",
+      "risk": "SAFE",
+      "implemented": false,
+      "description": "Inspect exposed WebDAV methods relevant to an advisory."
+    },
+    {
+      "id": "smb1_support",
+      "family": "FILE_SERVICES",
+      "risk": "SAFE",
+      "implemented": false,
+      "description": "Check whether SMBv1 negotiation is supported."
+    },
+    {
+      "id": "smb_signing_mode",
+      "family": "FILE_SERVICES",
+      "risk": "SAFE",
+      "implemented": false,
+      "description": "Determine whether SMB signing is required."
+    },
+    {
+      "id": "nfs_export_exposure",
+      "family": "FILE_SERVICES",
+      "risk": "SAFE",
+      "implemented": false,
+      "description": "Inspect NFS export exposure without accessing exported files."
+    },
+    {
+      "id": "anonymous_share_access",
+      "family": "FILE_SERVICES",
+      "risk": "ACTIVE",
+      "implemented": false,
+      "description": "Test CVE-specific anonymous share access with no writes."
+    },
+    {
+      "id": "rpc_service_exposure",
+      "family": "FILE_SERVICES",
+      "risk": "SAFE",
+      "implemented": false,
+      "description": "Check exposure of a specific RPC service required by a CVE."
+    },
+    {
+      "id": "snmp_version_exposure",
+      "family": "NETWORK_MGMT",
+      "risk": "SAFE",
+      "implemented": false,
+      "description": "Determine which SNMP protocol generation is exposed."
+    },
+    {
+      "id": "snmp_auth_mode",
+      "family": "NETWORK_MGMT",
+      "risk": "SAFE",
+      "implemented": false,
+      "description": "Validate a CVE-relevant SNMP authentication/security mode."
+    },
+    {
+      "id": "snmp_read_marker",
+      "family": "NETWORK_MGMT",
+      "risk": "ACTIVE",
+      "implemented": false,
+      "description": "Read one explicitly approved OID required to validate an advisory."
+    },
+    {
+      "id": "ipmi_cipher_exposure",
+      "family": "NETWORK_MGMT",
+      "risk": "SAFE",
+      "implemented": false,
+      "description": "Inspect advertised IPMI security/cipher capability."
+    },
+    {
+      "id": "management_port_exposure",
+      "family": "NETWORK_MGMT",
+      "risk": "SAFE",
+      "implemented": false,
+      "description": "Confirm exposure of a management service required by an advisory."
+    },
+    {
+      "id": "rtsp_auth_condition",
+      "family": "IOT_MEDIA",
+      "risk": "SAFE",
+      "implemented": false,
+      "description": "Validate whether a specific RTSP resource requires authentication."
+    },
+    {
+      "id": "onvif_unauth_endpoint",
+      "family": "IOT_MEDIA",
+      "risk": "SAFE",
+      "implemented": false,
+      "description": "Check a specified ONVIF endpoint for unauthenticated exposure."
+    },
+    {
+      "id": "mqtt_anonymous_connect",
+      "family": "IOT_MEDIA",
+      "risk": "SAFE",
+      "implemented": false,
+      "description": "Attempt one MQTT connection without subscribing or publishing."
+    },
+    {
+      "id": "upnp_service_exposure",
+      "family": "IOT_MEDIA",
+      "risk": "SAFE",
+      "implemented": false,
+      "description": "Inspect advertised UPnP services."
+    },
+    {
+      "id": "mdns_service_exposure",
+      "family": "IOT_MEDIA",
+      "risk": "SAFE",
+      "implemented": false,
+      "description": "Inspect relevant mDNS service advertisement."
+    },
+    {
+      "id": "dns_recursion_behavior",
+      "family": "CORE_NET",
+      "risk": "SAFE",
+      "implemented": false,
+      "description": "Test one DNS recursion condition using a benign query."
+    },
+    {
+      "id": "dns_version_disclosure",
+      "family": "CORE_NET",
+      "risk": "SAFE",
+      "implemented": false,
+      "description": "Check a CVE-specific DNS implementation/version disclosure."
+    },
+    {
+      "id": "dhcp_option_behavior",
+      "family": "CORE_NET",
+      "risk": "LAB_ONLY",
+      "implemented": false,
+      "description": "Validate a DHCP advisory condition only in an isolated test network."
+    },
+    {
+      "id": "ntp_mode_exposure",
+      "family": "CORE_NET",
+      "risk": "SAFE",
+      "implemented": false,
+      "description": "Check exposure of an NTP mode or command required by an advisory."
+    },
+    {
+      "id": "ldap_anonymous_bind",
+      "family": "CORE_NET",
+      "risk": "SAFE",
+      "implemented": false,
+      "description": "Test whether LDAP accepts an anonymous bind."
+    },
+    {
+      "id": "version_threshold",
+      "family": "SOFTWARE_FIRMWARE",
+      "risk": "SAFE",
+      "implemented": true,
+      "description": "Compare detected product/firmware against an affected or fixed version threshold."
+    },
+    {
+      "id": "vendor_advisory_status",
+      "family": "SOFTWARE_FIRMWARE",
+      "risk": "SAFE",
+      "implemented": true,
+      "description": "Use vendor applicability state as validation evidence."
+    },
+    {
+      "id": "package_fixed_version",
+      "family": "SOFTWARE_FIRMWARE",
+      "risk": "SAFE",
+      "implemented": true,
+      "description": "Compare an installed package against a vendor fixed-package version."
+    },
+    {
+      "id": "firmware_build_marker",
+      "family": "SOFTWARE_FIRMWARE",
+      "risk": "SAFE",
+      "implemented": true,
+      "description": "Check an explicitly identified firmware/build marker."
+    },
+    {
+      "id": "config_feature_precondition",
+      "family": "SOFTWARE_FIRMWARE",
+      "risk": "SAFE",
+      "implemented": false,
+      "description": "Confirm whether a configuration prerequisite for a CVE is enabled."
+    },
+    {
+      "id": "parser_response_signature",
+      "family": "BEHAVIOURAL",
+      "risk": "ACTIVE",
+      "implemented": false,
+      "description": "Send one bounded CVE-specific parser input and inspect response behavior."
+    },
+    {
+      "id": "bounded_latency_probe",
+      "family": "BEHAVIOURAL",
+      "risk": "ACTIVE",
+      "implemented": false,
+      "description": "Use a tiny capped request set to detect a CVE-specific latency effect."
+    },
+    {
+      "id": "bounded_resource_probe",
+      "family": "BEHAVIOURAL",
+      "risk": "ACTIVE",
+      "implemented": false,
+      "description": "Exercise a resource condition under strict health and request caps."
+    },
+    {
+      "id": "state_transition_noop",
+      "family": "BEHAVIOURAL",
+      "risk": "ACTIVE",
+      "implemented": false,
+      "description": "Exercise a reversible or no-op state transition required to demonstrate a CVE."
+    },
+    {
+      "id": "crash_precursor_signature",
+      "family": "BEHAVIOURAL",
+      "risk": "LAB_ONLY",
+      "implemented": false,
+      "description": "Detect only precursor conditions for crash/DoS vulnerabilities; normal execution prohibited."
+    }
+  ]
+}

@@ -1,0 +1,996 @@
+#!/usr/bin/env python3
+import sys as _identity_sys
+_identity_sys.path.insert(0,'/usr/local/lib/bh-interactive')
+from cloverkit_radio_identity import assert_layout as _assert_radio_layout
+_assert_radio_layout()
+
+import os
+import sys
+import re
+import time
+import signal
+import statistics
+import subprocess
+import selectors
+from collections import deque
+
+
+# ============================================================
+# ROOT
+# ============================================================
+
+if os.geteuid() != 0:
+    os.execvp(
+        "sudo",
+        [
+            "sudo",
+            "-n",
+            "/usr/local/bin/ap-find-compact",
+            *sys.argv[1:],
+        ],
+    )
+
+
+# ============================================================
+# CONFIG
+# ============================================================
+
+IW = "/usr/sbin/iw"
+IP = "/usr/sbin/ip"
+TSHARK = "/usr/bin/tshark"
+
+DEFAULT_DURATION = 60
+
+IFACE = "wlan1"
+
+# Frames older than these thresholds determine finder state.
+STALE_AFTER = 1.5
+LOST_AFTER = 3.0
+
+# Display refresh target.
+UPDATE_INTERVAL = 0.50
+
+# RSSI sanity range.
+MIN_RSSI = -95
+MAX_RSSI = -20
+
+# Rolling observations used for robust centre value.
+WINDOW_SECONDS = 1.20
+WINDOW_MAX = 15
+
+# Maximum movement of the displayed value per refresh.
+# This prevents driver RSSI spikes from instantly moving the GUI,
+# while still allowing a genuine large change to catch up rapidly.
+MAX_STEP_DB = 4
+
+# Trend comparison window.
+TREND_AGE = 1.50
+
+# Frequency acquisition time per candidate.
+ACQUIRE_SECONDS = 3.00
+
+
+# ============================================================
+# ARGUMENTS
+# ============================================================
+
+args = sys.argv[1:]
+
+duration = DEFAULT_DURATION
+
+if args and re.fullmatch(r"\d+", args[0]):
+    duration = max(1, int(args.pop(0)))
+
+freqs = []
+targets = []
+
+while args:
+
+    arg = args.pop(0)
+
+    if arg == "--freqs":
+
+        if not args:
+            print("Missing frequency list.", flush=True)
+            sys.exit(1)
+
+        raw = args.pop(0)
+
+        for value in raw.split():
+            if value.isdigit():
+                freqs.append(int(value))
+
+        continue
+
+    mac = arg.upper()
+
+    if re.fullmatch(
+        r"(?:[0-9A-F]{2}:){5}[0-9A-F]{2}",
+        mac,
+    ):
+        targets.append(mac)
+
+
+if not targets:
+    print("No valid target.", flush=True)
+    sys.exit(1)
+
+targets = list(dict.fromkeys(targets))
+freqs = list(dict.fromkeys(freqs))
+
+first = targets[0]
+label = first.replace(":", "")[-4:].upper()
+
+
+# ============================================================
+# HELPERS
+# ============================================================
+
+def run(cmd, **kwargs):
+
+    return subprocess.run(
+        cmd,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.DEVNULL,
+        text=True,
+        check=False,
+        **kwargs,
+    )
+
+
+def quality(dbm):
+
+    if dbm >= -49:
+        return "EXCELLENT"
+    if dbm >= -59:
+        return "GOOD"
+    if dbm >= -69:
+        return "FAIR"
+    if dbm >= -79:
+        return "WEAK"
+    if dbm >= -89:
+        return "POOR"
+
+    return "VERY-POOR"
+
+
+def seconds_left(start):
+
+    remaining = duration - int(time.monotonic() - start)
+
+    return max(0, remaining)
+
+
+def emit_search(start, lost=False):
+
+    if lost:
+        print(f"{label} NOT-SEEN", flush=True)
+    else:
+        print(f"{label} SCANNING", flush=True)
+
+    print(
+        f"SEARCHING {seconds_left(start)}s",
+        flush=True,
+    )
+
+
+def set_down():
+
+    run([IP, "link", "set", IFACE, "down"])
+
+
+def set_up():
+
+    run([IP, "link", "set", IFACE, "up"])
+
+
+def set_type(kind):
+
+    return run(
+        [
+            IW,
+            "dev",
+            IFACE,
+            "set",
+            "type",
+            kind,
+        ]
+    ).returncode == 0
+
+
+def set_freq(freq):
+
+    return run(
+        [
+            IW,
+            "dev",
+            IFACE,
+            "set",
+            "freq",
+            str(freq),
+        ]
+    ).returncode == 0
+
+
+def original_type():
+
+    result = run(
+        [
+            IW,
+            "dev",
+            IFACE,
+            "info",
+        ]
+    )
+
+    match = re.search(
+        r"^\s*type\s+(\S+)",
+        result.stdout,
+        re.MULTILINE,
+    )
+
+    if match:
+        return match.group(1)
+
+    return "managed"
+
+
+ORIGINAL_TYPE = original_type()
+restored = False
+capture_proc = None
+
+
+def restore():
+
+    global restored
+    global capture_proc
+
+    if restored:
+        return
+
+    restored = True
+
+    if capture_proc is not None:
+
+        try:
+            capture_proc.terminate()
+        except Exception:
+            pass
+
+        try:
+            capture_proc.wait(timeout=1)
+        except Exception:
+            try:
+                capture_proc.kill()
+            except Exception:
+                pass
+
+    set_down()
+    set_type(ORIGINAL_TYPE)
+    set_up()
+
+
+def handle_signal(signum, frame):
+
+    restore()
+    sys.exit(128 + signum)
+
+
+signal.signal(signal.SIGINT, handle_signal)
+signal.signal(signal.SIGTERM, handle_signal)
+
+
+# ============================================================
+# RADIO MODE
+# ============================================================
+
+set_down()
+
+if not set_type("monitor"):
+    print("Unable to set wlan1 monitor mode.", flush=True)
+    restore()
+    sys.exit(1)
+
+set_up()
+
+
+# ============================================================
+# ACTIVE DISCOVERY
+#
+# Only used when a generated target does not already contain
+# frequency information.
+# ============================================================
+
+def discover_frequencies():
+
+    # Active scan needs managed mode.
+    set_down()
+    set_type("managed")
+    set_up()
+
+    result = run(
+        [
+            IW,
+            "dev",
+            IFACE,
+            "scan",
+        ],
+        timeout=12,
+    )
+
+    discovered = set()
+
+    current_bssid = None
+    current_freq = None
+
+    wanted = {
+        target.lower()
+        for target in targets
+    }
+
+    def save():
+
+        if (
+            current_bssid in wanted
+            and current_freq is not None
+        ):
+            discovered.add(current_freq)
+
+    for line in result.stdout.splitlines():
+
+        m = re.match(
+            r"^BSS\s+([0-9A-Fa-f:]{17})",
+            line,
+        )
+
+        if m:
+            save()
+            current_bssid = m.group(1).lower()
+            current_freq = None
+            continue
+
+        m = re.match(
+            r"^\s*freq:\s*(\d+)",
+            line,
+        )
+
+        if m:
+            current_freq = int(m.group(1))
+
+    save()
+
+    set_down()
+    set_type("monitor")
+    set_up()
+
+    return sorted(discovered)
+
+
+if not freqs:
+
+    emit_search(time.monotonic(), lost=False)
+
+    try:
+        freqs = discover_frequencies()
+    except Exception:
+        freqs = []
+
+
+if not freqs:
+
+    print(f"{label} NOT-SEEN", flush=True)
+    print("SEARCHING 0s", flush=True)
+    print("DONE", flush=True)
+    restore()
+    sys.exit(1)
+
+
+# ============================================================
+# TSHARK FILTER
+# ============================================================
+
+target_filter = " || ".join(
+    f"wlan.bssid == {target.lower()}"
+    for target in targets
+)
+
+display_filter = (
+    f"({target_filter})"
+    " && wlan.fc.type_subtype == 8"
+    " && radiotap.dbm_antsignal"
+)
+
+
+def parse_rssi(raw):
+
+    if not raw:
+        return None
+
+    value = raw.split(",")[0].strip()
+
+    try:
+        dbm = int(float(value))
+    except ValueError:
+        return None
+
+    if not MIN_RSSI <= dbm <= MAX_RSSI:
+        return None
+
+    return dbm
+
+
+# ============================================================
+# ACQUISITION
+#
+# Sample each candidate channel independently and choose the
+# strongest stable BSSID/frequency combination.
+# ============================================================
+
+def sample_frequency(freq, seconds):
+
+    if not set_freq(freq):
+        return None
+
+    cmd = [
+        TSHARK,
+        "-l",
+        "-n",
+        "-i",
+        IFACE,
+        "-Y",
+        display_filter,
+        "-T",
+        "fields",
+        "-e",
+        "radiotap.dbm_antsignal",
+        "-e",
+        "wlan.bssid",
+    ]
+
+    proc = subprocess.Popen(
+        cmd,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.DEVNULL,
+        text=True,
+        bufsize=1,
+    )
+
+    sel = selectors.DefaultSelector()
+    sel.register(proc.stdout, selectors.EVENT_READ)
+
+    stop = time.monotonic() + seconds
+
+    values = {}
+
+    while time.monotonic() < stop:
+
+        events = sel.select(timeout=0.15)
+
+        for key, _ in events:
+
+            line = key.fileobj.readline()
+
+            if not line:
+                continue
+
+            parts = line.rstrip().split("\t")
+
+            if len(parts) < 2:
+                continue
+
+            dbm = parse_rssi(parts[0])
+
+            if dbm is None:
+                continue
+
+            bssid = parts[1].strip().upper()
+
+            if bssid not in targets:
+                continue
+
+            values.setdefault(
+                bssid,
+                [],
+            ).append(dbm)
+
+    try:
+        proc.terminate()
+        proc.wait(timeout=1)
+    except Exception:
+        try:
+            proc.kill()
+        except Exception:
+            pass
+
+    candidates = []
+
+    for bssid, readings in values.items():
+
+        if not readings:
+            continue
+
+        med = statistics.median(readings)
+
+        candidates.append(
+            (
+                med,
+                len(readings),
+                bssid,
+            )
+        )
+
+    if not candidates:
+        return None
+
+    candidates.sort(
+        key=lambda row: (
+            row[0],
+            row[1],
+        ),
+        reverse=True,
+    )
+
+    med, count, bssid = candidates[0]
+
+    return {
+        "freq": freq,
+        "bssid": bssid,
+        "median": med,
+        "count": count,
+    }
+
+
+start = time.monotonic()
+
+best_candidate = None
+
+# Exact target: no acquisition pass is needed.
+# Lock immediately and let the continuous passive capture
+# establish the first validated RSSI.
+if len(freqs) == 1 and len(targets) == 1:
+
+    best_candidate = {
+        "freq": freqs[0],
+        "bssid": targets[0],
+        "median": None,
+        "count": 0,
+    }
+
+    candidates_to_test = []
+
+else:
+
+    candidates_to_test = freqs
+
+
+for freq in candidates_to_test:
+
+    if seconds_left(start) <= 1:
+        break
+
+    emit_search(start)
+
+    candidate = sample_frequency(
+        freq,
+        min(
+            ACQUIRE_SECONDS,
+            max(
+                0.5,
+                seconds_left(start) - 0.5,
+            ),
+        ),
+    )
+
+    if candidate is None:
+        continue
+
+    if (
+        best_candidate is None
+        or candidate["median"] > best_candidate["median"]
+        or (
+            candidate["median"] == best_candidate["median"]
+            and candidate["count"] > best_candidate["count"]
+        )
+    ):
+        best_candidate = candidate
+
+
+if best_candidate is None:
+
+    print(f"{label} NOT-SEEN", flush=True)
+    print(
+        f"SEARCHING {seconds_left(start)}s",
+        flush=True,
+    )
+    print("DONE", flush=True)
+
+    restore()
+    sys.exit(1)
+
+
+locked_freq = best_candidate["freq"]
+locked_bssid = best_candidate["bssid"]
+
+set_freq(locked_freq)
+
+# LCD / CLI metadata.
+# Emitted once after the finder has committed to exactly one
+# BSSID/frequency pair.
+print(
+    f"LOCKED {locked_freq} {locked_bssid}",
+    flush=True,
+)
+
+
+# ============================================================
+# TRACKING CAPTURE
+#
+# After acquisition we remain locked to ONE BSSID/frequency.
+# 2.4 GHz and 5 GHz RSSI are never mixed.
+# ============================================================
+
+track_filter = (
+    f"wlan.bssid == {locked_bssid.lower()}"
+    " && wlan.fc.type_subtype == 8"
+    " && radiotap.dbm_antsignal"
+)
+
+cmd = [
+    TSHARK,
+    "-l",
+    "-n",
+    "-i",
+    IFACE,
+    "-Y",
+    track_filter,
+    "-T",
+    "fields",
+    "-e",
+    "frame.time_epoch",
+    "-e",
+    "radiotap.dbm_antsignal",
+]
+
+capture_proc = subprocess.Popen(
+    cmd,
+    stdout=subprocess.PIPE,
+    stderr=subprocess.DEVNULL,
+    text=True,
+    bufsize=1,
+)
+
+selector = selectors.DefaultSelector()
+selector.register(
+    capture_proc.stdout,
+    selectors.EVENT_READ,
+)
+
+
+# Observations:
+# (monotonic_receive_time, dbm)
+samples = deque(maxlen=WINDOW_MAX)
+
+# Display history:
+# (time, displayed_dbm)
+history = deque(maxlen=40)
+
+last_valid = None
+displayed = None
+validated_best = None
+last_emit = 0.0
+
+
+def calculate_display(now):
+
+    global displayed
+    global validated_best
+
+    while (
+        samples
+        and now - samples[0][0] > WINDOW_SECONDS
+    ):
+        samples.popleft()
+
+    if not samples:
+        return displayed
+
+    centre = int(
+        round(
+            statistics.median(
+                value
+                for _, value in samples
+            )
+        )
+    )
+
+    if displayed is None:
+        displayed = centre
+    else:
+        delta = centre - displayed
+
+        if delta > MAX_STEP_DB:
+            delta = MAX_STEP_DB
+        elif delta < -MAX_STEP_DB:
+            delta = -MAX_STEP_DB
+
+        displayed += delta
+
+    # BEST is based only on the robust displayed value.
+    if (
+        validated_best is None
+        or displayed > validated_best
+    ):
+        validated_best = displayed
+
+    return displayed
+
+
+# Negative direction is deliberately harder to trigger than
+# positive direction. Wi-Fi RSSI commonly dips while the user is
+# still walking toward the target due to multipath/body shadowing.
+#
+# FARTHER-  : >= 4 dB sustained deterioration for 2.5 seconds
+# FARTHER-- : >= 6 dB sustained deterioration for 4.0 seconds
+#
+# Positive movement remains responsive.
+
+negative_since = None
+negative_peak = None
+
+
+def calculate_trend(now, current):
+
+    global negative_since
+    global negative_peak
+
+    if current is None:
+        negative_since = None
+        negative_peak = None
+        return "STEADY"
+
+    history.append(
+        (
+            now,
+            current,
+        )
+    )
+
+    reference = None
+
+    for timestamp, value in history:
+
+        if now - timestamp >= TREND_AGE:
+            reference = value
+        else:
+            break
+
+    if reference is None:
+        negative_since = None
+        negative_peak = None
+        return "STEADY"
+
+    diff = current - reference
+
+    # --------------------------------------------------------
+    # POSITIVE TREND
+    # Keep this responsive.
+    # Any genuine recovery also cancels a pending reverse cue.
+    # --------------------------------------------------------
+
+    if diff >= 6:
+        negative_since = None
+        negative_peak = None
+        return "CLOSER++"
+
+    if diff >= 3:
+        negative_since = None
+        negative_peak = None
+        return "CLOSER+"
+
+    # --------------------------------------------------------
+    # NEGATIVE TREND
+    #
+    # A single weak reading is not enough.
+    # Start a persistence timer only after a meaningful drop.
+    # --------------------------------------------------------
+
+    if diff <= -4:
+
+        if negative_since is None:
+            negative_since = now
+            negative_peak = diff
+
+        else:
+            if negative_peak is None:
+                negative_peak = diff
+            else:
+                negative_peak = min(
+                    negative_peak,
+                    diff,
+                )
+
+        negative_age = now - negative_since
+
+        # Strong reverse warning only after a substantial loss
+        # has persisted for several seconds.
+        if (
+            negative_age >= 4.0
+            and negative_peak <= -6
+            and diff <= -4
+        ):
+            return "FARTHER--"
+
+        # Mild colder indication also requires persistence.
+        if negative_age >= 2.5:
+            return "FARTHER-"
+
+        return "STEADY"
+
+    # --------------------------------------------------------
+    # RECOVERY / UNCERTAIN
+    #
+    # If the signal gets back within 2 dB of its reference,
+    # abandon the pending reverse decision.
+    #
+    # A -3 dB wobble therefore does NOT produce a back arrow.
+    # --------------------------------------------------------
+
+    if diff >= -2:
+        negative_since = None
+        negative_peak = None
+
+    return "STEADY"
+
+
+# Seed from acquisition only when acquisition actually supplied
+# a validated median. Exact single-BSSID targets begin in
+# SEARCHING state until their first passive beacon arrives.
+if best_candidate["median"] is not None:
+
+    displayed = int(round(best_candidate["median"]))
+    validated_best = displayed
+    last_valid = time.monotonic()
+
+    samples.append(
+        (
+            last_valid,
+            displayed,
+        )
+    )
+
+else:
+
+    displayed = None
+    validated_best = None
+    last_valid = None
+
+
+# ============================================================
+# MAIN LOOP
+# ============================================================
+
+try:
+
+    while True:
+
+        now = time.monotonic()
+
+        if now - start >= duration:
+            break
+
+        timeout = max(
+            0.01,
+            UPDATE_INTERVAL - (now - last_emit),
+        )
+
+        events = selector.select(
+            timeout=min(timeout, 0.25)
+        )
+
+        for key, _ in events:
+
+            line = key.fileobj.readline()
+
+            if not line:
+                continue
+
+            parts = line.rstrip().split("\t")
+
+            if len(parts) < 2:
+                continue
+
+            dbm = parse_rssi(parts[1])
+
+            if dbm is None:
+                continue
+
+            received = time.monotonic()
+
+            samples.append(
+                (
+                    received,
+                    dbm,
+                )
+            )
+
+            last_valid = received
+
+        now = time.monotonic()
+
+        if now - last_emit < UPDATE_INTERVAL:
+            continue
+
+        last_emit = now
+
+        if last_valid is None:
+
+            print(
+                f"{label} SCANNING",
+                flush=True,
+            )
+
+            print(
+                f"SEARCHING {seconds_left(start)}s",
+                flush=True,
+            )
+
+            continue
+
+        age = now - last_valid
+
+        if age >= LOST_AFTER:
+
+            print(
+                f"{label} NOT-SEEN",
+                flush=True,
+            )
+
+            print(
+                f"SEARCHING {seconds_left(start)}s",
+                flush=True,
+            )
+
+            continue
+
+        if age >= STALE_AFTER:
+
+            print(
+                f"{label} SCANNING",
+                flush=True,
+            )
+
+            print(
+                f"SEARCHING {seconds_left(start)}s",
+                flush=True,
+            )
+
+            continue
+
+        current = calculate_display(now)
+
+        if current is None:
+            emit_search(start)
+            continue
+
+        trend = calculate_trend(
+            now,
+            current,
+        )
+
+        print(
+            f"{label} "
+            f"{current}dBm "
+            f"{quality(current)}",
+            flush=True,
+        )
+
+        print(
+            f"{trend} "
+            f"{seconds_left(start)}s",
+            flush=True,
+        )
+
+finally:
+
+    print("DONE", flush=True)
+    restore()

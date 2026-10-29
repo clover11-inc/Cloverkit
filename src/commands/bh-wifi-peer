@@ -1,0 +1,3 @@
+#!/bin/sh
+/usr/bin/python3 -c "import sys; sys.path.insert(0,'/usr/local/lib/bh-interactive'); from cloverkit_radio_identity import assert_layout; assert_layout()" || exit 2
+exec /usr/bin/python3 /usr/local/lib/bh-interactive/wifi_peer.py "$@"

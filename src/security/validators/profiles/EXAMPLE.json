@@ -1,0 +1,15 @@
+{
+  "cve": "CVE-2099-00001",
+  "pattern": "http_status_signature",
+  "risk": "SAFE",
+  "enabled": false,
+  "description": "Example only - never executed.",
+  "parameters": {
+    "scheme": "http",
+    "port": 80,
+    "method": "GET",
+    "path": "/example",
+    "expected_status": 418,
+    "max_requests": 1
+  }
+}

@@ -1,0 +1,2 @@
+#!/bin/bash
+exec /mnt/scripts/hosts.sh bh

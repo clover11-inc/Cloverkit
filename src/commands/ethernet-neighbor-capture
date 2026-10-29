@@ -1,0 +1,39 @@
+#!/bin/bash
+
+set -u
+
+IF="${1:-eth0}"
+
+TSHARK="/usr/bin/tshark"
+TIMEOUT="/usr/bin/timeout"
+IP="/usr/sbin/ip"
+
+# Only permit Ethernet-style interfaces.
+case "$IF" in
+    eth*|en*)
+        ;;
+    *)
+        echo "REFUSED: invalid Ethernet interface" >&2
+        exit 2
+        ;;
+esac
+
+# Explicitly prevent wireless interfaces ever being passed through.
+case "$IF" in
+    wlan*)
+        echo "REFUSED: wireless interface" >&2
+        exit 2
+        ;;
+esac
+
+if ! "$IP" link show "$IF" >/dev/null 2>&1; then
+    exit 3
+fi
+
+exec "$TIMEOUT" 8 \
+    "$TSHARK" \
+    -i "$IF" \
+    -n \
+    -c 1 \
+    -f 'ether proto 0x88cc or ether dst 01:00:0c:cc:cc:cc' \
+    -V

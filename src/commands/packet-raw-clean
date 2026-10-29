@@ -1,0 +1,13 @@
+#!/bin/bash
+
+DIR="/mnt/captures/packet-raw"
+DAYS=30
+
+[ -d "$DIR" ] || exit 0
+
+find "$DIR" \
+    -type f \
+    -name '*.pcapng' \
+    -mtime +"$DAYS" \
+    -print \
+    -delete

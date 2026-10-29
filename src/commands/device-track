@@ -1,0 +1,434 @@
+#!/usr/bin/env python3
+
+import argparse
+import asyncio
+import os
+import subprocess
+import sys
+import time
+
+from bleak import BleakScanner
+
+from functools import partial
+print = partial(print, flush=True)
+
+
+def valid_rssi(v):
+    return v is not None and -126 <= v <= 20
+
+
+def quality(v):
+    if v >= -50:
+        return "VERY STRONG"
+    if v >= -60:
+        return "STRONG"
+    if v >= -70:
+        return "GOOD"
+    if v >= -80:
+        return "WEAK"
+    return "VERY WEAK"
+
+
+def choose_adapter():
+    for name in ("hci1", "hci0"):
+        if os.path.exists(f"/sys/class/bluetooth/{name}"):
+            return name
+    raise RuntimeError("NO BLUETOOTH")
+
+
+def run(*args):
+    return subprocess.run(
+        args,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+    )
+
+
+def fingerprint_match(adv, fingerprint):
+
+    if not fingerprint:
+        return False
+
+    fp = fingerprint.lower()
+
+    uuids = [
+        u.lower()
+        for u in (adv.service_uuids or [])
+    ]
+
+    if fp == "flipper":
+        return any(
+            u in {
+                "00003081-0000-1000-8000-00805f9b34fb",
+                "00003082-0000-1000-8000-00805f9b34fb",
+                "00003083-0000-1000-8000-00805f9b34fb",
+            }
+            for u in uuids
+        )
+
+    if fp == "smarttag":
+        return any(
+            "fd5a" in u
+            for u in uuids
+        )
+
+    return False
+
+
+async def track(
+    target,
+    duration,
+    adapter,
+    fingerprint,
+):
+
+    samples = []
+    last_seen = None
+    previous_avg = None
+    last_avg = None
+
+    active_address = target
+    original_address = target
+
+    fingerprint_seen = {}
+
+    start = time.monotonic()
+    last_print = 0
+
+
+    def callback(device, adv):
+
+        nonlocal last_seen
+        nonlocal active_address
+        nonlocal samples
+        nonlocal previous_avg
+        nonlocal last_avg
+
+        address = device.address.upper()
+        now = time.monotonic()
+
+        # Original MAC always wins.
+        if address == original_address:
+
+            if active_address != original_address:
+                print(
+                    f"ORIGINAL MAC {original_address}"
+                )
+
+            active_address = original_address
+
+        elif fingerprint_match(
+            adv,
+            fingerprint,
+        ):
+
+            fingerprint_seen[address] = now
+
+            # Keep only recently observed fingerprint matches.
+            recent = [
+                addr
+                for addr, seen_at
+                in fingerprint_seen.items()
+                if now - seen_at <= 5
+            ]
+
+            # Only reacquire when fingerprint is unambiguous.
+            if (
+                active_address == original_address
+                and last_seen is not None
+                and now - last_seen <= 5
+            ):
+                return
+
+            if len(recent) != 1:
+                return
+
+            candidate = recent[0]
+
+            if active_address != candidate:
+
+                active_address = candidate
+
+                samples = []
+                previous_avg = None
+                last_avg = None
+
+                print(
+                    f"REACQUIRED {candidate}"
+                )
+
+        else:
+            return
+
+
+        if address != active_address:
+            return
+
+
+        if valid_rssi(adv.rssi):
+
+            samples.append(
+                adv.rssi
+            )
+
+            if len(samples) > 6:
+                del samples[:-6]
+
+            last_seen = now
+
+
+    scanner = BleakScanner(
+        detection_callback=callback,
+        bluez={
+            "adapter": adapter,
+            "filters": {
+                "DuplicateData": True,
+            },
+        },
+    )
+
+    import signal
+    loop=asyncio.get_running_loop()
+    task=asyncio.current_task()
+    loop.add_signal_handler(signal.SIGTERM,task.cancel)
+    try:
+        await scanner.start()
+    except BaseException:
+        try: await scanner.stop()
+        finally: loop.remove_signal_handler(signal.SIGTERM)
+        raise
+
+    try:
+
+        while duration is None or time.monotonic() - start < duration:
+
+            await asyncio.sleep(0.25)
+
+            now = time.monotonic()
+
+            if now - last_print < 1:
+                continue
+
+            last_print = now
+
+            remaining = max(0,int(duration-(now-start))) if duration is not None else None
+            timing = f'{remaining}s' if remaining is not None else f'LIVE {int(now-start)}s'
+
+
+            if (
+                last_seen is None
+                or not samples
+            ):
+
+                print(
+                    f"SEARCHING... {timing}"
+                )
+
+                continue
+
+
+            age = now - last_seen
+
+
+            if age <= 1.5:
+
+                avg = round(
+                    sum(samples)
+                    / len(samples)
+                )
+
+                trend = "STEADY"
+
+                if previous_avg is not None:
+
+                    diff = (
+                        avg
+                        - previous_avg
+                    )
+
+                    if diff >= 6:
+                        trend = "CLOSER++"
+
+                    elif diff >= 3:
+                        trend = "CLOSER+"
+
+                    elif diff <= -6:
+                        trend = "FARTHER--"
+
+                    elif diff <= -3:
+                        trend = "FARTHER-"
+
+                previous_avg = avg
+                last_avg = avg
+
+                print(
+                    f"{avg:>4}dBm "
+                    f"{quality(avg):<11} "
+                    f"{trend:<9} "
+                    f"{timing}"
+                )
+
+                continue
+
+
+            if (
+                age <= 4.5
+                and last_avg is not None
+            ):
+
+                stale = max(
+                    1,
+                    int(age),
+                )
+
+                print(
+                    f"{last_avg:>4}dBm "
+                    f"{quality(last_avg):<11} "
+                    f"STALE {stale}s "
+                    f"{timing}"
+                )
+
+                continue
+
+
+            print(
+                f"SEARCHING... last heard {int(age)}s ago · {timing}"
+            )
+
+    finally:
+        try: await scanner.stop()
+        finally: loop.remove_signal_handler(signal.SIGTERM)
+
+
+def main():
+
+    parser = argparse.ArgumentParser(
+        prog="device-track"
+    )
+
+    parser.add_argument("address")
+
+    parser.add_argument(
+        "seconds",
+        nargs="?",
+        type=int,
+        default=30,
+    )
+
+    parser.add_argument(
+        "--fingerprint",
+        choices=[
+            "flipper",
+            "smarttag",
+        ],
+    )
+
+    args = parser.parse_args()
+
+    target = args.address.upper()
+
+    # Legacy positional seconds remain accepted by existing target scripts.
+    duration = None  # Tracking stops only on user cancellation.
+
+
+    if os.geteuid() != 0:
+
+        os.execvp(
+            "sudo",
+            [
+                "sudo",
+                "/usr/local/bin/device-track",
+            ] + sys.argv[1:],
+        )
+
+
+    try:
+        adapter = choose_adapter()
+
+    except RuntimeError as e:
+        print(e)
+        return 1
+
+
+    was_active = (
+        subprocess.run(
+            [
+                "systemctl",
+                "is-active",
+                "--quiet",
+                "bluetooth",
+            ]
+        ).returncode == 0
+    )
+
+    blocked = (
+        "Soft blocked: yes"
+        in subprocess.run(
+            [
+                "/usr/sbin/rfkill",
+                "list",
+                "bluetooth",
+            ],
+            capture_output=True,
+            text=True,
+        ).stdout
+    )
+
+
+    try:
+
+        run(
+            "systemctl",
+            "start",
+            "bluetooth",
+        )
+
+        run(
+            "/usr/sbin/rfkill",
+            "unblock",
+            "bluetooth",
+        )
+
+        print("DEVICE TRACK")
+        print(f"Target : {target}")
+        print(f"Radio  : {adapter}")
+
+        if args.fingerprint:
+            print(
+                f"Match  : MAC + {args.fingerprint.upper()}"
+            )
+        else:
+            print("Match  : MAC")
+
+        print("Mode   : Until stopped or you leave this screen")
+        print()
+
+        try:
+            asyncio.run(track(target,duration,adapter,args.fingerprint))
+        except (KeyboardInterrupt,asyncio.CancelledError):
+            print('Tracking stopped.')
+
+        print()
+        print("DONE")
+
+    finally:
+
+        if blocked:
+            run(
+                "/usr/sbin/rfkill",
+                "block",
+                "bluetooth",
+            )
+
+        if not was_active:
+            run(
+                "systemctl",
+                "stop",
+                "bluetooth",
+            )
+
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

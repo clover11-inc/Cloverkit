@@ -1,0 +1,133 @@
+#!/bin/bash
+
+if [ "$EUID" -ne 0 ]; then
+    exec sudo /usr/local/bin/iperf-server "$@"
+fi
+
+IP=/usr/sbin/ip
+IPERF=/usr/bin/iperf3
+
+PIDFILE=/run/bh-iperf-server.pid
+STATEFILE=/run/bh-iperf-server.state
+LOGFILE=/run/bh-iperf-server.log
+
+PORT=5201
+
+running() {
+    [ -s "$PIDFILE" ] || return 1
+
+    PID=$(cat "$PIDFILE" 2>/dev/null)
+    [ -n "$PID" ] || return 1
+
+    kill -0 "$PID" 2>/dev/null
+}
+
+stop_server() {
+    if running; then
+        PID=$(cat "$PIDFILE")
+
+        kill "$PID" 2>/dev/null || true
+
+        for N in $(seq 1 5); do
+            kill -0 "$PID" 2>/dev/null || break
+            sleep 1
+        done
+
+        kill -0 "$PID" 2>/dev/null &&
+            kill -9 "$PID" 2>/dev/null || true
+    fi
+
+    rm -f "$PIDFILE" "$STATEFILE"
+
+    echo "IPERF SERVER"
+    echo "Status : OFF"
+}
+
+show_status() {
+    echo "IPERF SERVER"
+
+    if ! running; then
+        echo "Status : OFF"
+        return
+    fi
+
+    IF=$(sed -n 's/^IF=//p' "$STATEFILE")
+    ADDR=$(sed -n 's/^IP=//p' "$STATEFILE")
+
+    echo "Status : RUNNING"
+    echo "Via    : $IF"
+    echo "IP     : $ADDR"
+    echo "Port   : $PORT"
+}
+
+case "${1:-status}" in
+    start)
+        REQUESTED="${2:-}"
+
+        if running; then
+            show_status
+            exit 0
+        fi
+
+        IF=$(/usr/local/bin/iperf-select-if "$REQUESTED") || {
+            echo "IPERF SERVER"
+            echo "Status : NO INTERFACE"
+            exit 1
+        }
+
+        ADDR=$(
+            "$IP" -4 -o addr show "$IF" |
+            awk '{print $4; exit}' |
+            cut -d/ -f1
+        )
+
+        [ -n "$ADDR" ] || {
+            echo "IPERF SERVER"
+            echo "Status : NO IP"
+            exit 1
+        }
+
+        rm -f "$PIDFILE" "$STATEFILE" "$LOGFILE"
+
+        nohup "$IPERF" \
+            -s \
+            -B "$ADDR" \
+            -p "$PORT" \
+            >"$LOGFILE" 2>&1 &
+
+        PID=$!
+        echo "$PID" > "$PIDFILE"
+
+        cat > "$STATEFILE" <<STATE
+IF=$IF
+IP=$ADDR
+STATE
+
+        sleep 1
+
+        if ! running; then
+            echo "IPERF SERVER"
+            echo "Status : FAILED"
+            tail -5 "$LOGFILE" 2>/dev/null
+            exit 1
+        fi
+
+        show_status
+        ;;
+
+    stop)
+        stop_server
+        ;;
+
+    status)
+        show_status
+        ;;
+
+    *)
+        echo "Usage:"
+        echo "  iperf-server start [interface]"
+        echo "  iperf-server status"
+        echo "  iperf-server stop"
+        exit 1
+        ;;
+esac

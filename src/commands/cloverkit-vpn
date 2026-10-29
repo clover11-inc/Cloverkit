@@ -1,0 +1,18 @@
+#!/usr/bin/python3
+"""Explicit optional VPN control. Never connects if not configured."""
+import json,os,subprocess,sys
+from pathlib import Path
+sys.path.insert(0,'/usr/local/lib/bh-interactive')
+from cloverkit_optional_setup import private_json
+if len(sys.argv)!=2 or sys.argv[1] not in ('on','off','status'):raise SystemExit('Use cloverkit-vpn on|off|status')
+action=sys.argv[1]
+try:configured=private_json(Path('/etc/cloverkit/vpn.json')).get('configured',False)
+except (OSError,ValueError):configured=False
+if not configured:print('VPN: NOT CONFIGURED — System > VPN setup');raise SystemExit(0 if action=='status' else 2)
+if action=='on':
+    private_json(Path('/etc/cloverkit/vpn.json'))
+    profile=Path('/etc/cloverkit/vpn/client.ovpn').stat()
+    if profile.st_uid!=0 or profile.st_mode&0o077:raise SystemExit('VPN profile permissions are unsafe')
+if action!='status' and os.geteuid()!=0:raise SystemExit('VPN control requires the installed privileged policy')
+args=['systemctl','is-active','cloverkit-vpn.service'] if action=='status' else ['systemctl','start' if action=='on' else 'stop','cloverkit-vpn.service']
+raise SystemExit(subprocess.run(args).returncode)

@@ -1,0 +1,3 @@
+#!/bin/sh
+# CLOVERKIT_SHARED_SERIAL_V1
+exec /usr/bin/python3 /usr/local/lib/bh-interactive/shared_console.py "$@"

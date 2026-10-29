@@ -1,0 +1,9 @@
+verbosity=1
+bootlogo=false
+console=both
+disp_mode=1920x1080p60
+overlay_prefix=sun8i-a33
+fdtfile=sun8i-a33-flipper-blackhat.dtb
+extraargs=net.ifnames=0 biosdevname=0
+rootdev=UUID=5df32696-365e-4fde-bc56-e5ad6e08cbba
+rootfstype=ext4

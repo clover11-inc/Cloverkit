@@ -1,0 +1,2 @@
+#!/bin/sh
+exec /usr/bin/sudo -n /usr/bin/python3 -I /usr/local/lib/cloverkit/vehicle/conveh_access.py session

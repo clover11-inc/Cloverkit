@@ -1,0 +1,58 @@
+#!/bin/bash
+
+set -u
+
+IF="eth0"
+IP="/usr/sbin/ip"
+TSHARK="/usr/bin/tshark"
+
+if ! "$IP" link show "$IF" >/dev/null 2>&1; then
+    exit 3
+fi
+
+# Field list is supplied by ethernet-live itself after it checks which
+# tshark fields exist.  Only -e field names are accepted here.
+
+FIELDS=()
+
+while [ "$#" -gt 0 ]; do
+    case "$1" in
+        -e)
+            shift
+
+            [ "$#" -gt 0 ] || exit 2
+
+            case "$1" in
+                *[!A-Za-z0-9_.]*|'')
+                    echo "REFUSED: invalid tshark field" >&2
+                    exit 2
+                    ;;
+            esac
+
+            FIELDS+=("-e" "$1")
+            ;;
+
+        *)
+            echo "REFUSED: invalid argument" >&2
+            exit 2
+            ;;
+    esac
+
+    shift
+done
+
+FILTER='ether proto 0x88cc or
+        ether proto 0x8809 or
+        ether dst 01:80:c2:00:00:00 or
+        ether dst 01:00:0c:cc:cc:cc or
+        ether dst 01:00:0c:cc:cc:cd or
+        (vlan and ether multicast)'
+
+exec "$TSHARK" \
+    -l \
+    -i "$IF" \
+    -n \
+    -f "$FILTER" \
+    -T fields \
+    -E occurrence=f \
+    "${FIELDS[@]}"

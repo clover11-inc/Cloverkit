@@ -1,0 +1,53 @@
+#!/bin/bash
+
+if [ "$EUID" -ne 0 ]; then
+    exec sudo /usr/local/bin/target-clean "$@"
+fi
+
+DIR="/mnt/scripts"
+TYPE="${1:-all}"
+
+case "$TYPE" in
+    wifi)
+        rm -f \
+            "$DIR"/TARGET-WIFI-* \
+            "$DIR"/TARGET-AP-* \
+            "$DIR"/TARGET-HIDDEN-* \
+            "$DIR"/TARGET-SSID-* \
+            2>/dev/null
+        ;;
+
+    net)
+        rm -f "$DIR"/TARGET-NET-* 2>/dev/null
+        ;;
+
+    serial)
+        rm -f "$DIR"/TARGET-SERIAL-* 2>/dev/null
+        ;;
+
+    usb)
+        rm -f "$DIR"/TARGET-USB-* 2>/dev/null
+        ;;
+
+    ble)
+        rm -f "$DIR"/TARGET-BLE-* 2>/dev/null
+        ;;
+
+    all)
+        # Boot/global cleanup:
+        # remove every generated target script, including future
+        # target families we have not explicitly added yet.
+        find "$DIR" \
+            -maxdepth 1 \
+            -type f \
+            -name 'TARGET-*.sh' \
+            -delete
+        ;;
+
+    *)
+        echo "Usage: target-clean [wifi|net|serial|usb|ble|all]"
+        exit 1
+        ;;
+esac
+
+echo "Targets cleaned: $TYPE"

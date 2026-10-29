@@ -1,0 +1,25 @@
+{
+  "schema": 1,
+  "brand": "CloverKit",
+  "operator": null,
+  "modules": {
+    "panel": true,
+    "wireless": true,
+    "ethernet": true,
+    "ble": true,
+    "serial": true,
+    "security": true,
+    "games": false,
+    "remote_sharing": false
+  },
+  "deferred": [
+    "pc_recovery",
+    "uplink_auto_connect"
+  ],
+  "notes": "Examples are templates; setup must never install placeholder radio identities.",
+  "optional_setup": [
+    "email",
+    "vpn",
+    "recovery_hotspot"
+  ]
+}
