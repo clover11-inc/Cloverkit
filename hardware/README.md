@@ -2,11 +2,20 @@
 
 Match **chipset + hardware revision + kernel driver + firmware**, not just a retail name or a Wi-Fi generation printed on a box. The source includes a fresh-card image builder; it does not write a physical drive or alter an existing installation.
 
-## Hardware used in development
+## Tested hardware and software
 
-Flipper Zero and Blackhat with its 480 × 480 display, two compact TP-Link USB Wi-Fi/Bluetooth adapters, a PC USB serial connection, USB Ethernet/console cables as required, and spare SD media were used. Two EDUP EP-AX1678 adapters were ordered for later work; they are not part of the validated baseline. Retail names alone do not establish a chipset or supported band.
+- Flipper Zero — Momentum mntm-012
+- Flipper Blackhat with display — Blackhat OS, tested with kernels 6.16.8-edge-sunxi and 7.1.13-edge-sunxi
+- 128 GB microSD card
+- Built-in Realtek RTL8723DS Wi-Fi
+- TP-Link RTL8821CU USB adapters — 2.4/5 GHz Wi-Fi and Bluetooth
+- USB Ethernet adapter
+- External USB serial-console adapter
 
-The original working-card kernel was 6.16.8-edge-sunxi; the fresh-card Blackhat OS v1.4 image uses 7.1.13-edge-sunxi. Do not copy modules between them.
+### Testing pending
+
+- EDUP EP-AX1678 — detected on the original CloverKit; 6 GHz capture testing pending
+- ELM-compatible OBD2 adapter — vehicle testing pending
 
 ## Observed development baseline
 
@@ -23,7 +32,7 @@ The following was collected read-only for this release. MAC addresses, USB seria
 | USB hosts | USB 2.0, EHCI and MUSB paths | Different host paths have behaved differently in development. A successful hot-plug is not proof of reliable warm reboot behaviour. |
 | OS tools | Python 3.14.6, BlueZ 5.87, iw 6.17, tcpdump 4.99.6, TShark 4.6.6 | These versions describe the observed baseline, not minimum versions or guaranteed compatibility. |
 
-Exact dongle retail SKUs, USB Ethernet chipset, USB serial chipset and vehicle adapter were not established by this inventory. They are **unknown here**, not silently recommended substitutes.
+USB Ethernet and external USB serial-console adapters were tested during development; their exact models/chipsets are not recorded here.
 
 ## Hardware and cables by workflow
 
@@ -54,7 +63,7 @@ The package does not bundle a kernel, firmware blobs or DKMS modules. Use matchi
 
 ## 6 GHz / alternate radios
 
-The 6 GHz menu is a capture mode, not a compatibility promise. It needs a radio, driver, firmware, regulatory configuration and capture path that actually support the band on the chosen kernel. This baseline's attached USB radios are described as 802.11ac; no 6 GHz capability is claimed. Likewise, a Wi-Fi 7 product label does not establish the required Linux/ARM monitor-mode support.
+The 6 GHz menu is a capture mode, not a compatibility promise. It needs a radio, driver, firmware, regulatory configuration and capture path that actually support the band on the chosen kernel. The EDUP EP-AX1678 was detected on the original kernel 6.16.8-edge-sunxi using the mt7921u driver, with monitor mode and enabled 6 GHz channels advertised. Actual 6 GHz capture testing remains pending; this does not establish support on the fresh-card kernel. Likewise, a Wi-Fi 7 product label does not establish the required Linux/ARM monitor-mode support.
 
 ## Direct Ethernet setup
 

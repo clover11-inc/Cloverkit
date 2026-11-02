@@ -53,6 +53,21 @@ Start with [INSTALL.md](INSTALL.md). The supported route is a **fresh spare SD c
 
 A compatible Flipper companion app is required for Flipper controls and is **not included in this release**. Use PC serial or SSH to get started.
 
+## Tested hardware and software
+
+- Flipper Zero — Momentum mntm-012
+- Flipper Blackhat with display — Blackhat OS, tested with kernels 6.16.8-edge-sunxi and 7.1.13-edge-sunxi
+- 128 GB microSD card
+- Built-in Realtek RTL8723DS Wi-Fi
+- TP-Link RTL8821CU USB adapters — 2.4/5 GHz Wi-Fi and Bluetooth
+- USB Ethernet adapter
+- External USB serial-console adapter
+
+### Testing pending
+
+- EDUP EP-AX1678 — detected on the original CloverKit; 6 GHz capture testing pending
+- ELM-compatible OBD2 adapter — vehicle testing pending
+
 ## Current limits
 
 - Vehicle support initially covers standard OBD2 engine/emissions diagnostics, not universal ABS, airbags, coding or ECU programming. Vehicle hardware and 6 GHz testing remain pending.
